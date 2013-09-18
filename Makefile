@@ -4,16 +4,18 @@
 #在/mnt/ramfs中写大文件
 #
 #
+
 OUT=$(PWD)/debug
 CC=gcc
+#CFLAGS += -D STDTEST
 all: block.o main.o
-	$(CC) $(OUT)/block.o $(OUT)/main.o -o $(OUT)/main
+	$(CC)  $(OUT)/block.o $(OUT)/main.o $(CFLAGS)  -o  $(OUT)/main
 	
 block.o: src/block.c src/block.h
-	$(CC) -c  src/block.c -o $(OUT)/block.o
+	$(CC) $(CFLAGS) -c  src/block.c -o $(OUT)/block.o
 	
 main.o: src/main.c src/block.h
-	$(CC) -c src/main.c -o $(OUT)/main.o
+	$(CC) $(CFLAGS) -c src/main.c -o $(OUT)/main.o
 	
 clean:
 	rm $(OUT)/*

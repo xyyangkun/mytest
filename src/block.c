@@ -5,6 +5,11 @@
  *      Author: yangkun
  */
 #include "block.h"
+enum get_type
+{
+	get_start = 1,
+	get_rear   = 2
+};
 static int hd_fd;
 static long long hd_blocks;
 static char year_data[(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
@@ -152,12 +157,55 @@ enum block_type block_check(char *buf)
 		return no_block;
 }
 /***********************************************************
+ * 根据传入 参数 返回队列中最后的时间，或最前的时间
+ ***********************************************************/
+int get_seek(struct  seek_block *block, int num,enum get_type type )
+{
+	int mark_begin = 0;
+	int tmp = 0;
+	if(type == get_start)
+	{
+		while(num>=0)
+		{
+			num--;
+			if(block->time > tmp)
+				tmp = block->time;
+		}
+		return tmp;
+	}else if(type == get_rear)
+	{
+		while(num>=0)
+		{
+			num--;
+			if(!mark_begin)
+			{
+				if(block->time > 0)
+				{
+					mark_begin =1;
+					tmp = block->time;
+				}
+			}else
+			{
+				if(block->time > 0 && tmp < block->time)
+					tmp = block->time;
+			}
+		}
+		return tmp;
+	}
+	return -1;
+}
+/***********************************************************
  * 初始化块
  ***********************************************************/
 int block_init()
 {
-
-
+	//year_data
+	enum block_type this_block_type;
+	if( block_read(year_data, sizeof(struct year_data) ,1,&this_block_type ) < 0)
+	{
+		printf("block_read\n");
+		return -1;
+	}
 	return 0;
 }
 
@@ -179,50 +227,53 @@ int block_write(char *buf, int bufsize, int buf_size)
 	return 0;
 }
 /***********************************************************
- * 年块，天块，秒块的读取
+ * 自动识别年块，天块，秒块并读取
  * buf:要写入块的内容
  * bufsize:缓冲区的大小
  * seek 读取块的位置
  ***********************************************************/
-int block_read(char *buf, int bufsize ,long long seek)
+int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_block_type)
 {
 	int err;
-	static char  block_head[512];
+	struct hd_frame *sec_block_head;
 #ifdef TEST_RAM
-	//先读一块
-	//printf("size of year_block:%d\n",(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE);
-	//struct year_block *year_block_data=(struct year_block*)year_data;
 	//先读第一块
-	memset((void *)block_head, 0, sizeof(block_head));
-	if( (err=hd_read(block_head, sizeof(block_head),1, first_block)) < 0 )
+	if( (err=hd_read(buf, bufsize,1, seek)) < 0 )
 	{
 	 printf("hd_read error\n");
 	}
-	switch ( block_check(block_head) )
+	*this_block_type = block_check(buf);
+	switch ( *this_block_type )
 	{
 	case sec_block:
-		memcpy(year_data, block_head, sizeof(block_head));
-		//从年块开始的第二块开始读 （年块大小-1）块数据
-		if( (err=hd_read(year_data+BLOCKSIZE ,sizeof(year_data)- BLOCKSIZE, \
-				(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE - 1, first_block+1)) < 0 )
+		sec_block_head = (struct hd_frame *)buf;
+		if( (err=hd_read(buf+BLOCKSIZE ,bufsize- BLOCKSIZE, \
+				(sec_block_head->size + sizeof(struct hd_frame) + BLOCKSIZE -1)/BLOCKSIZE - 1, seek+1)) < 0 )
 		{
 		 printf("hd_read error\n");
 		}
-		//年块读到了
+		//秒块读到了
 		//......
 		break;
 	case day_block:
-		memcpy(day_data, block_head, sizeof(block_head));
+		//从天块开始的第二块开始读 （天块大小-1）块数据
+		if( (err=hd_read(buf+BLOCKSIZE ,bufsize- BLOCKSIZE, \
+				(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE - 1, seek+1)) < 0 )
+		{
+		 printf("hd_read error\n");
+		}
+		//天块读到了
+		//......
+		break;
+	case year_block:
 		//从年块开始的第二块开始读 （年块大小-1）块数据
-		if( (err=hd_read(day_data+BLOCKSIZE ,sizeof(day_data)- BLOCKSIZE, \
-				(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE - 1, first_block+1)) < 0 )
+		if( (err=hd_read(buf+BLOCKSIZE ,bufsize- BLOCKSIZE, \
+				(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE - 1, seek+1)) < 0 )
 		{
 		 printf("hd_read error\n");
 		}
 		//年块读到了
 		//......
-		break;
-	case year_block:
 		break;
 	default:
 		return -1;

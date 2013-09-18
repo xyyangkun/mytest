@@ -11,7 +11,7 @@
 int main()
 {
 	long long blocks;
-	char buf[512];
+	static char buf[512];
 	int tmp;
 	if(dh_init()<0)
 	{
@@ -51,7 +51,7 @@ int main()
 			return -1;
 		}
 		//ะฃั้
-		if(strcmp(buf, buf1, 512)!=0)
+		if(memcmp(buf, buf1, 512)!=0)
 		{
 			printf("blcoks:%d",tmp);
 			printf("check error!\n");
