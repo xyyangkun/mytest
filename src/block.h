@@ -85,6 +85,14 @@ extern int dh_init();
 extern int hd_write(char *buf, int bufsize, int buf_size, long long seek);
 extern int hd_read (char *buf, int bufsize, int buf_size, long long seek);
 extern int hd_getsize(long long *blocks);
+enum opera_type{
+	head = 0,
+	tail = 1
+};
+extern int block_init();
+extern int block_write(char *buf, int bufsize, int buf_size);
+extern int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_block_type);
+extern int block_year_get();
 #endif /* BLOCK_H_ */
 
 

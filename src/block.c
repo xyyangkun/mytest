@@ -199,9 +199,38 @@ int get_seek(struct  seek_block *block, int num,enum get_type type )
  ***********************************************************/
 int block_init()
 {
+	char buf[512]={0};
+	int err;
+#ifndef YEARBLOCKTEST
+	//从第0块开始读1块，用大小512字节的缓冲区
+	if( (err=hd_read(buf, sizeof(buf),1, 0)) < 0 )
+	{
+	 printf("hd_read error\n");
+	}
+	if(memcmp(buf+256, "gtalarm", 7)== 0)
+#endif //YEARBLOCKTEST
+	{
+		printf("this is a new disk\n");
+		struct year_block *yeardata=(struct year_block *) year_data ;
+		memset(buf, 0, sizeof(buf));
+		memcpy(buf, "gtalarm", 7);
+		if( (err=hd_write(buf, sizeof(buf), sizeof(buf), 0)) < 0 )
+		{
+		 printf("hd_read error\n");
+		}
+		//写年块头
+		memset(year_data , 0 , sizeof(year_data));
+		memcpy( yeardata->year_head, year_head, sizeof(year_head) ); //数据头
+		//yeardata->year_queue_data.queue_size=0;
+		if(hd_write(year_data, sizeof(year_data), sizeof(year_data), first_block) < 0)
+		{
+			printf("hd_write error\n");
+			return -1;
+		}
+	}
 	//year_data
 	enum block_type this_block_type;
-	if( block_read(year_data, sizeof(struct year_data) ,1,&this_block_type ) < 0)
+	if( block_read((char *)year_data, sizeof(year_data) , first_block, &this_block_type ) < 0)
 	{
 		printf("block_read\n");
 		return -1;
@@ -218,7 +247,6 @@ int block_init()
 int block_write(char *buf, int bufsize, int buf_size)
 {
 #ifdef TEST_RAM
-
 
 
 #else
@@ -284,4 +312,166 @@ int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_blo
 #else
 #endif//TEST_RAM
 	return 0;
+}
+
+
+
+
+
+
+
+/***********************************************************
+*功能：获取year block存储较早块的位置
+*
+ ***********************************************************/
+int block_year_get(struct  seek_block *block,enum opera_type get_type)
+{
+	struct year_block *yearblock = NULL;
+	//block中数据是否合法
+	if(block == NULL  )
+	{
+		return -1;
+	}
+	yearblock = (struct year_block *)year_data;
+	if(get_type == get_start)
+		memcpy(block, &(yearblock->sekk_block_data[yearblock->year_queue_data.queue_head]),\
+					sizeof(struct seek_block));
+	else
+	memcpy(block, &(yearblock->sekk_block_data[yearblock->year_queue_data.queue_tail]) ,\
+			sizeof(struct seek_block));
+}
+/***********************************************************
+*功能:向年块中添加新块（只添加新写入的块）
+*
+ ***********************************************************/
+int block_year_add(struct  seek_block *block,enum opera_type get_type)
+{
+	struct year_block *yearblock  = (struct year_block *)year_data;;
+	//block中数据是否合法
+	if(block == NULL || block->time==0 || block->seek==0 )
+	{
+		return -1;
+	}
+	//判断队列中是否还有空间
+	if(yearblock->year_queue_data.queue_tail+1 == yearblock->year_queue_data.queue_head)
+	{
+#ifdef YEARBLOCKTEST
+		printf("head:%d\n",yearblock->year_queue_data.queue_head);
+		printf("tail:%d\n",yearblock->year_queue_data.queue_tail);
+		printf("size:%d\n",yearblock->year_queue_data.queue_size);
+#endif
+		printf("year block full\n");
+		return -2;//满了
+	}
+	memcpy( &(yearblock->sekk_block_data[yearblock->year_queue_data.queue_tail]) ,\
+			block, sizeof(struct seek_block));
+	yearblock->year_queue_data.queue_tail = (yearblock->year_queue_data.queue_tail+1)%MAXDAY;
+	yearblock->year_queue_data.queue_size++;
+}
+/***********************************************************
+*功能：向年块中删除块（只删除最老的块，除非你想做任意删除）
+*
+ ***********************************************************/
+int block_year_del(enum opera_type get_type)
+{
+	struct year_block *yearblock = NULL;
+	yearblock = (struct year_block *)year_data;
+	if(yearblock->year_queue_data.queue_tail == yearblock->year_queue_data.queue_head)
+	{
+		printf("emputy\n");
+		return -3;//空了
+	}
+	memset( &yearblock->sekk_block_data[yearblock->year_queue_data.queue_head],0 ,sizeof(struct  seek_block) );
+	yearblock->year_queue_data.queue_head = (yearblock->year_queue_data.queue_head+1)%MAXDAY;
+	yearblock->year_queue_data.queue_size--;
+}
+//对年块的读写，和逻辑的测试
+int test_year_data()
+{
+#ifdef YEARBLOCKTEST
+	//产生在0->MAXDAY之间的随机数，操作使年块中的数据达到随机数间。如果数据多了调用del,少了调add
+	int i,times;
+	struct year_block *yearblock = (struct year_block *)year_data;
+	static struct  seek_block block;
+	static enum opera_type get_type;
+	printf("head:%d\n",yearblock->year_queue_data.queue_head);
+	printf("tail:%d\n",yearblock->year_queue_data.queue_tail);
+	printf("size:%d\n",yearblock->year_queue_data.queue_size);
+	while(1)//测到你满意为止
+	{
+		int seed = rand()%MAXDAY;
+		//1、创建数据
+		printf("seed:queue_size:%d\t%d\n",seed,yearblock->year_queue_data.queue_size);
+		if(seed == yearblock->year_queue_data.queue_size )
+		{
+			printf("eque\n");
+			continue;
+		}
+		else if(seed > yearblock->year_queue_data.queue_size )
+		{
+			times = seed - yearblock->year_queue_data.queue_size;
+			printf("year add:%d\n",times);
+			for(i=0; i < times; i++)
+			{
+				block.seek=rand();
+				block.time=rand()/*%MAXDAY+1*/ /*+1防止出现0*/;
+				if(block_year_add(&block,get_type) < 0)
+				{
+					printf("block year add err\n and exit");
+					return -1;
+				}
+			}
+		}else
+		{
+			times = yearblock->year_queue_data.queue_size - seed ;
+			printf("year del:%d\n",times);
+			for(i=0; i < times; i++)
+			{
+				if(block_year_del(get_type) < 0)
+				{
+					printf("block year del err\n and exit");
+					return -1;
+				}
+			}
+		}
+		//2、验证数据：
+		//printf("block head time:%d\nblock tail time:%d\n",\
+				yearblock->sekk_block_data[yearblock->year_queue_data.queue_head].time,\
+				yearblock->sekk_block_data[yearblock->year_queue_data.queue_tail].time);
+		//if ( yearblock->year_queue_data.queue_size < 6 )//小数据输出队列内容
+		{
+			int j;
+			//printf("\n");
+			//printf("\tsize:%d\n",yearblock->year_queue_data.queue_size);
+			//队列中不为0正常，为0则可能逻辑上的错误
+			for( j = 0; j < yearblock->year_queue_data.queue_size; j++)
+			{
+				//printf("time[%d]:\t%d\n",(yearblock->year_queue_data.queue_head+j)%MAXDAY, \
+						yearblock->sekk_block_data[(yearblock->year_queue_data.queue_head+j)%MAXDAY].time);
+				if( yearblock->sekk_block_data[(yearblock->year_queue_data.queue_head+j)%MAXDAY].time == 0)
+				{
+					printf("logic wrong 1 and exit\n");
+					exit(1);
+				}
+			}
+			//不在队列中的数据应该全部为0，不为0则可能有逻辑错误
+			for( j = 0 ; j < (MAXDAY-yearblock->year_queue_data.queue_size); j++)
+			{
+				//printf("time[%d]:\t%d\n",(yearblock->year_queue_data.queue_tail+j)%MAXDAY, \
+						yearblock->sekk_block_data[(yearblock->year_queue_data.queue_tail+j)%MAXDAY].time);
+				if( yearblock->sekk_block_data[(yearblock->year_queue_data.queue_tail+j)%MAXDAY].time != 0)
+				{
+					printf("logic wrong 2 and exit\n");
+					exit(1);
+				}
+			}
+		}
+		//写入数据
+		if(hd_write(year_data, sizeof(year_data), sizeof(year_data), first_block) < 0)
+		{
+			printf("hd_write error\n");
+			return -1;
+		}
+	}
+#endif//YEARBLOCKTEST
 }

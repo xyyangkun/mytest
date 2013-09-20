@@ -6,7 +6,6 @@
  */
 #include "block.h"
 
-
 //#define STDTEST
 int main()
 {
@@ -61,4 +60,5 @@ int main()
 	printf("check ok\n");
 #endif //STDTEST
 	block_init();
+	test_year_data();
 }

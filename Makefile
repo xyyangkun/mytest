@@ -7,6 +7,8 @@
 
 OUT=$(PWD)/debug
 CC=gcc
+
+CFLAGS += -D YEARBLOCKTEST
 #CFLAGS += -D STDTEST
 all: block.o main.o
 	$(CC)  $(OUT)/block.o $(OUT)/main.o $(CFLAGS)  -o  $(OUT)/main
