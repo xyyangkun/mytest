@@ -11,9 +11,16 @@ enum get_type
 	get_rear   = 2
 };
 static int hd_fd;
+//硬盘上的总块数，也是容量
 static long long hd_blocks;
+//硬盘上当前天块的位置，读写时会用到
+static long long hd_current_day_seek=0;
+//当前秒块应该写入的位置
+static long long hd_current_sec_seek = 0;
 static char year_data[(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
+static char day_data_bac[(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
 static char day_data[(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
+static long long first_seek=first_block+sizeof(year_data)+sizeof(day_data_bac);
 /**********************************************************
  * 初始化硬盘读写功能
  **********************************************************/
@@ -219,10 +226,19 @@ int block_init()
 		 printf("hd_read error\n");
 		}
 		//写年块头
+		struct day_block *daydata=(struct day_block *) day_data ;
 		memset(year_data , 0 , sizeof(year_data));
-		memcpy( yeardata->year_head, year_head, sizeof(year_head) ); //数据头
+		memcpy( yeardata->year_head, day_head, sizeof(day_head) ); //数据头
 		//yeardata->year_queue_data.queue_size=0;
 		if(hd_write(year_data, sizeof(year_data), sizeof(year_data), first_block) < 0)
+		{
+			printf("hd_write error\n");
+			return -1;
+		}
+		//写天块头
+		memset(day_data , 0 , sizeof(day_data));
+		memcpy( day_data, day_data, sizeof(day_data) ); //数据头
+		if(hd_write(day_data, sizeof(day_data), sizeof(day_data), first_seek) < 0)
 		{
 			printf("hd_write error\n");
 			return -1;
@@ -231,6 +247,12 @@ int block_init()
 	//year_data
 	enum block_type this_block_type;
 	if( block_read((char *)year_data, sizeof(year_data) , first_block, &this_block_type ) < 0)
+	{
+		printf("block_read\n");
+		return -1;
+	}
+	//day_data
+	if( block_read((char *)day_data, sizeof(day_data) , first_seek, &this_block_type ) < 0)
 	{
 		printf("block_read\n");
 		return -1;
@@ -269,6 +291,7 @@ int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_blo
 	if( (err=hd_read(buf, bufsize,1, seek)) < 0 )
 	{
 	 printf("hd_read error\n");
+	 return err;
 	}
 	*this_block_type = block_check(buf);
 	switch ( *this_block_type )
@@ -279,6 +302,7 @@ int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_blo
 				(sec_block_head->size + sizeof(struct hd_frame) + BLOCKSIZE -1)/BLOCKSIZE - 1, seek+1)) < 0 )
 		{
 		 printf("hd_read error\n");
+		 return err;
 		}
 		//秒块读到了
 		//......
@@ -289,6 +313,7 @@ int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_blo
 				(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE - 1, seek+1)) < 0 )
 		{
 		 printf("hd_read error\n");
+		 return err;
 		}
 		//天块读到了
 		//......
@@ -299,11 +324,13 @@ int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_blo
 				(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE - 1, seek+1)) < 0 )
 		{
 		 printf("hd_read error\n");
+		 return err;
 		}
 		//年块读到了
 		//......
 		break;
 	default:
+		printf("read block head error\n");
 		return -1;
 		break;
 	}
@@ -329,9 +356,7 @@ int block_year_get(struct  seek_block *block,enum opera_type get_type)
 	struct year_block *yearblock = NULL;
 	//block中数据是否合法
 	if(block == NULL  )
-	{
-		return -1;
-	}
+		return BLOCK_ERR_NULL;
 	yearblock = (struct year_block *)year_data;
 	if(get_type == get_start)
 		memcpy(block, &(yearblock->sekk_block_data[yearblock->year_queue_data.queue_head]),\
@@ -348,10 +373,10 @@ int block_year_add(struct  seek_block *block,enum opera_type get_type)
 {
 	struct year_block *yearblock  = (struct year_block *)year_data;;
 	//block中数据是否合法
-	if(block == NULL || block->time==0 || block->seek==0 )
-	{
-		return -1;
-	}
+	if(block == NULL )
+			return BLOCK_ERR_NULL;
+	if(block->time==0 || block->seek==0)
+			return BLOCK_ERR_ZERO;
 	//判断队列中是否还有空间
 	if(yearblock->year_queue_data.queue_tail+1 == yearblock->year_queue_data.queue_head)
 	{
@@ -361,12 +386,19 @@ int block_year_add(struct  seek_block *block,enum opera_type get_type)
 		printf("size:%d\n",yearblock->year_queue_data.queue_size);
 #endif
 		printf("year block full\n");
-		return -2;//满了
+		return BLOCK_ERR_FULL;//满了
 	}
 	memcpy( &(yearblock->sekk_block_data[yearblock->year_queue_data.queue_tail]) ,\
 			block, sizeof(struct seek_block));
 	yearblock->year_queue_data.queue_tail = (yearblock->year_queue_data.queue_tail+1)%MAXDAY;
 	yearblock->year_queue_data.queue_size++;
+	//写入数据
+	if(hd_write(year_data, sizeof(year_data), sizeof(year_data), first_block) < 0)
+	{
+		printf("hd_write error\n");
+		return HD_ERR_WRITE;
+	}
+	return 0;
 }
 /***********************************************************
 *功能：向年块中删除块（只删除最老的块，除非你想做任意删除）
@@ -379,11 +411,18 @@ int block_year_del(enum opera_type get_type)
 	if(yearblock->year_queue_data.queue_tail == yearblock->year_queue_data.queue_head)
 	{
 		printf("emputy\n");
-		return -3;//空了
+		return BLOCK_ERR_EMPTY;//空了
 	}
 	memset( &yearblock->sekk_block_data[yearblock->year_queue_data.queue_head],0 ,sizeof(struct  seek_block) );
 	yearblock->year_queue_data.queue_head = (yearblock->year_queue_data.queue_head+1)%MAXDAY;
 	yearblock->year_queue_data.queue_size--;
+	//写入数据
+	if(hd_write(year_data, sizeof(year_data), sizeof(year_data), first_block) < 0)
+	{
+		printf("hd_write error\n");
+		return HD_ERR_WRITE;
+	}
+	return 0;
 }
 //对年块的读写，和逻辑的测试
 int test_year_data()
@@ -466,12 +505,117 @@ int test_year_data()
 				}
 			}
 		}
-		//写入数据
-		if(hd_write(year_data, sizeof(year_data), sizeof(year_data), first_block) < 0)
+
+	}
+#endif//YEARBLOCKTEST
+}
+/***********************************************************
+*功能:向天块中添加新块，每有一个秒（帧）块写入时。添加新块。
+*
+ ***********************************************************/
+int block_day_add(struct  seek_block *block)
+{
+	struct day_block *daydata = (struct day_block *)day_data;
+	int index;//今天的第多少秒
+	static int tmp = 0;
+	//block中数据是否合法
+	if(block == NULL )
+			return BLOCK_ERR_NULL;
+	if(block->time==0 || block->seek==0)
+			return BLOCK_ERR_ZERO;
+	//memcmp(daydata, day_head, 8)!=0,
+	if(*(long long *)daydata != *(long long *)day_head)
+	{
+		return BLOCK_ERR_DATA_HEAD;
+	}
+	//复制数据
+	index = block->time%SECOFDAY;
+	if(daydata->seek_block_data[index].seek !=0 )
+		return BLOCK_ERR_DAY_SEC_MUT;//当前的秒块位置有值了。
+	else
+		memcpy(&daydata->seek_block_data[index], block, sizeof(struct  seek_block));
+
+
+	//每tmp == x次写入一次天块。  hd_current_day_seek
+	tmp++;
+	if(tmp == 300)
+	{
+		tmp = 0;
+		enum block_type this_block_type;
+		//day_data
+		if( block_read((char *)day_data, sizeof(day_data) , hd_current_day_seek, &this_block_type ) < 0)
 		{
-			printf("hd_write error\n");
+			printf("block_read\n");
 			return -1;
 		}
 	}
-#endif//YEARBLOCKTEST
+
+
+}
+
+/***********************************************************
+*功能:向硬盘中写入数据。
+*
+ ***********************************************************/
+int write_disk()
+{
+	struct year_block *yearblock =  (struct year_block *)year_data;
+	struct  seek_block block;
+	enum opera_type get_type;
+	enum block_type this_block_type;
+	int err;
+	//在年块中找到当前天块的位置
+	if(yearblock->year_queue_data.queue_size ==0)//新硬盘
+	{
+		block.seek = first_seek;
+		block.time = time(NULL);
+		//年块中添加一块
+		if( ( err=block_year_add(&block, get_type) ) < 0)
+			return err;
+		hd_current_day_seek = first_seek;
+		memset(day_data, 0, sizeof(day_data));
+		hd_current_sec_seek = first_seek+sizeof(day_data);
+		goto write_sec;
+	}
+	get_type = head;
+	err = block_year_get(&block,get_type);
+	if(err < 0)
+	{
+		printf("block_year_get err\n");
+	}
+	hd_current_day_seek = block.seek;
+	//读取天块的内容
+	err = block_read(day_data, sizeof(day_data) ,hd_current_day_seek, &this_block_type);
+	if(err < 0)
+		return err;
+	if(this_block_type != day_block)
+	{
+		printf("read type err!!!\n");
+		return BLOCK_ERR_READ_TYPE;
+	}
+	//在天块中找到当前秒块的位置
+			/*此处应该是多余的，直接读写就好了。*/
+	//写数据
+	write_sec:
+	while(1)
+	{
+		//1读系统时间：\
+					a、还在今天（通常情况）：\
+					b、今天过了（1、正常情况2、程序正好在今天的23点59分59.999999秒运行的！！！）:把内存中的天块写入硬盘，memset(day_data)\
+					c、系统时间比今天0点提前了：\
+											A、提前不超过20分钟：认为是系统对时错误，或其它错误，此时间应该写入今天的块，而不是昨天\
+											B、提前超过20分钟：：这是神马错误？？？？
+		//2、判断硬盘是否满： \
+						a、满：改hd_current_day_seek和hd_current_sec_seek的值\
+						b、未满
+
+		//3、判断下一块要写入的数据的位置是否是空数据(其实只有满了后才应该判断)：  \
+						a、是空数据 \
+						b、不是空数据:  \
+									A、是秒块:从day_data_bac，中清除此位置\
+									B、是天块：把天读到day_data_bac中，同时写入到对应的位置
+
+		//写数据
+	}
+	return 0;
 }

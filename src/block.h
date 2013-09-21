@@ -37,7 +37,7 @@ enum block_type{
 	no_block =4
 };
 
-static long long first_block=1;
+#define first_block 1
 struct  seek_block{ int time; long long seek;}__attribute__ ((packed));
 //年块
 static const unsigned char year_head[8]={0x59,0x45,0x41,0x52,0xa5,0xa5,0xa5,0xa5};
@@ -77,10 +77,10 @@ struct hd_frame
 /****************************************************************************
  * 硬盘读写
  ***************************************************************************/
-#define HD_ERR_FD  -1//硬盘文件描述符出错
-#define HD_ERR_SEEK -2//硬盘seek出错
-#define HD_ERR_WRITE -3//硬盘write出错
-#define HD_ERR_OVER  -100  //!!数据溢出缓冲区
+#define HD_ERR_FD  -1			//硬盘文件描述符出错
+#define HD_ERR_SEEK -2			//硬盘seek出错
+#define HD_ERR_WRITE -3			//硬盘write出错
+#define HD_ERR_OVER  -100  		//!!数据溢出缓冲区
 extern int dh_init();
 extern int hd_write(char *buf, int bufsize, int buf_size, long long seek);
 extern int hd_read (char *buf, int bufsize, int buf_size, long long seek);
@@ -93,6 +93,15 @@ extern int block_init();
 extern int block_write(char *buf, int bufsize, int buf_size);
 extern int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_block_type);
 extern int block_year_get();
+
+#define BLOCK_ERR_EMPTY -4		//（年块天块中数据）为空，没有有效数据
+#define BLOCK_ERR_FULL -5 		//（年块天块中数据）数据写满了，应该只有年块会写满
+#define BLOCK_ERR_DATA_HEAD -6 	//（年块天块中数据）数据块头错误
+#define BLOCK_ERR_NULL -7		//传入指针参数为NULL
+#define BLOCK_ERR_ZERO -8		//传入指针参数有效，但数据区全为0
+#define BLOCK_ERR_DAY_SEC_MUT -9		//天块中一个秒块的位置有多个秒块对应。有可能的情况是1、一秒有多个I帧2、系统时间出错，向前走了
+
+#define BLOCK_ERR_READ_TYPE -10	//读取数据块类型出错误
 #endif /* BLOCK_H_ */
 
 
