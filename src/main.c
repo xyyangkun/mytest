@@ -60,5 +60,6 @@ int main()
 	printf("check ok\n");
 #endif //STDTEST
 	block_init();
-	test_year_data();
+	//test_year_data();
+	write_disk();
 }

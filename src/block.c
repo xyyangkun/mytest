@@ -20,7 +20,9 @@ static long long hd_current_sec_seek = 0;
 static char year_data[(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
 static char day_data_bac[(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
 static char day_data[(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
+static char frame_buff[BUFSIZE];
 static long long first_seek=first_block+sizeof(year_data)+sizeof(day_data_bac);
+
 /**********************************************************
  * 初始化硬盘读写功能
  **********************************************************/
@@ -237,7 +239,7 @@ int block_init()
 		}
 		//写天块头
 		memset(day_data , 0 , sizeof(day_data));
-		memcpy( day_data, day_data, sizeof(day_data) ); //数据头
+		memcpy( day_data, day_head, sizeof(day_head) ); //数据头
 		if(hd_write(day_data, sizeof(day_data), sizeof(day_data), first_seek) < 0)
 		{
 			printf("hd_write error\n");
@@ -549,73 +551,270 @@ int block_day_add(struct  seek_block *block)
 			return -1;
 		}
 	}
-
+	return 0;
 
 }
-
+/***********************************************************
+*功能:根据day_data中的值找到应该写入的位置;day_data中只记录了I帧的位置，要读完I帧后面的P帧，并找到应该写入的位置
+*返回：写入的位置
+ ***********************************************************/
+long long  block_day_read_and_get_seek()
+{
+	struct day_block *daydata    =  (struct day_block  *)day_data;
+	struct seek_block *seek_block_data = daydata->seek_block_data;
+	int i;
+	for(i = SECOFDAY; i > 0; i--)//
+	{
+		if(seek_block_data[i].seek !=0 )//此算法要牺牲最后1S的视频数据
+			return seek_block_data[i].seek;
+	}
+	printf("day block is emputy\n");
+	return 0;//不前天块中没有有效数据
+}
 /***********************************************************
 *功能:向硬盘中写入数据。
 *
  ***********************************************************/
-int write_disk()
+int write_disk1()
 {
 	struct year_block *yearblock =  (struct year_block *)year_data;
-	struct  seek_block block;
-	enum opera_type get_type;
-	enum block_type this_block_type;
-	int err;
+	struct day_block *daydata    =  (struct day_block  *)day_data;
+	struct hd_frame  *secdata    =  (struct hd_frame    *)frame_buff;
+	static struct  seek_block block;
+	static enum opera_type get_type;
+	static enum block_type this_block_type;
+	static int err;
+	static int sys_time;
+	long long count=0;
+	int buff_size;
+	int buff_blocks;//buff占有块数
+	long long seek_tmp;
 	//在年块中找到当前天块的位置
 	if(yearblock->year_queue_data.queue_size ==0)//新硬盘
 	{
+		printf("new disk1\n");
 		block.seek = first_seek;
-		block.time = time(NULL);
+		block.time = get_time();
 		//年块中添加一块
 		if( ( err=block_year_add(&block, get_type) ) < 0)
+		{
+			DP("debug\n");
 			return err;
+		}
 		hd_current_day_seek = first_seek;
 		memset(day_data, 0, sizeof(day_data));
 		hd_current_sec_seek = first_seek+sizeof(day_data);
 		goto write_sec;
 	}
-	get_type = head;
+	get_type = tail;
 	err = block_year_get(&block,get_type);
 	if(err < 0)
 	{
 		printf("block_year_get err\n");
+		return err;
 	}
-	hd_current_day_seek = block.seek;
-	//读取天块的内容
+	hd_current_day_seek = block.seek;//指定当前天块的位置
+	//读取天块的内容到内存中
+	printf("debug1\n");
 	err = block_read(day_data, sizeof(day_data) ,hd_current_day_seek, &this_block_type);
 	if(err < 0)
+	{
+		DP("debug");
 		return err;
+	}
 	if(this_block_type != day_block)
 	{
 		printf("read type err!!!\n");
 		return BLOCK_ERR_READ_TYPE;
 	}
 	//在天块中找到当前秒块的位置
-			/*此处应该是多余的，直接读写就好了。*/
+	seek_tmp = block_day_read_and_get_seek();
+	if(seek_tmp ==0)
+		hd_current_sec_seek = hd_current_day_seek + sizeof(struct day_block);
+	else
+		hd_current_sec_seek = seek_tmp;
+
+
+	printf("debug2\n");
 	//写数据
-	write_sec:
+write_sec:
 	while(1)
 	{
-		//1读系统时间：\
+/**********************************************************************************************************************************************************/
+		//1、读系统时间：\
 					a、还在今天（通常情况）：\
-					b、今天过了（1、正常情况2、程序正好在今天的23点59分59.999999秒运行的！！！）:把内存中的天块写入硬盘，memset(day_data)\
+					b、"今天"过了（1、正常情况2、程序正好在今天的23点59分59.999999秒运行的！！！）:把内存中的天块写入硬盘，memset(day_data)\
 					c、系统时间比今天0点提前了：\
 											A、提前不超过20分钟：认为是系统对时错误，或其它错误，此时间应该写入今天的块，而不是昨天\
 											B、提前超过20分钟：：这是神马错误？？？？
-		//2、判断硬盘是否满： \
+		get_type = tail;
+		printf("debug2.1\n");
+		err = block_year_get(&block,get_type);
+		if(err < 0)
+		{
+			printf("block_year_get err\n");
+			return err;
+		}
+		sys_time = get_time();
+
+		if(sys_time%SECOFDAY == block.time%SECOFDAY)		/*系统时间和年块中最后一块天块的时间在同一天*/
+		{
+			goto next1;
+		}
+		else if(sys_time > block.time)//"今天"过去了
+		{
+			printf("debug2.2\n");
+			//hd_current_sec_seek;
+			return BLOCK_ERR_DAY_PASS;
+		}
+		else if(block.time - sys_time >60*20)//提前不超过20分钟
+		{
+			goto next1;
+		}
+		else
+			return BLOCK_ERR_UNKNOW_TIME;
+		printf("debug3\n");
+/**********************************************************************************************************************************************************/
+
+
+next1:
+printf("next1\n");
+		if( (buff_size = get_frame())<0)
+		{
+			DP("debug");
+			return buff_size;
+		}
+/**********************************************************************************************************************************************************/
+		//2、判断硬盘的剩余空间是否够写这一帧： \
 						a、满：改hd_current_day_seek和hd_current_sec_seek的值\
 						b、未满
-
+		buff_blocks = ( buff_size + BLOCKSIZE - 1 ) / BLOCKSIZE;
+		printf("buff_blocks:%d\n",buff_blocks);
+		seek_tmp = block_day_read_and_get_seek();
+		if(seek_tmp ==0)
+		{
+			DP("DEBUG");
+			hd_current_sec_seek = hd_current_day_seek + sizeof(struct day_block);
+		}
+		else
+		{
+			DP("DEBUG");
+			hd_current_sec_seek = seek_tmp;
+		}
+		if(hd_blocks - hd_current_sec_seek < buff_blocks)//剩下的空间不足够写入此帧数据了
+		{
+			DP("debug\n");
+			return HD_ERR_FULL;
+		}
+/**********************************************************************************************************************************************************/
 		//3、判断下一块要写入的数据的位置是否是空数据(其实只有满了后才应该判断)：  \
 						a、是空数据 \
 						b、不是空数据:  \
 									A、是秒块:从day_data_bac，中清除此位置\
 									B、是天块：把天读到day_data_bac中，同时写入到对应的位置
+/**********************************************************************************************************************************************************/
+		//些步暂时没有。。
 
-		//写数据
+		//4、写数据
+		err=hd_write(frame_buff, sizeof(frame_buff), buff_size, hd_current_sec_seek);
+		if(err<0)
+		{
+			DP("debug");
+			return err;
+		}
+		if(secdata->is_I == 1)
+		{
+			block.time = sys_time;
+			block.seek = hd_current_sec_seek;
+			if( ( err = block_day_add(&block) ) < 0)//是I帧，写入
+			{
+				DP("debug");
+				return err;
+			}
+		}
+		count++;
+		if(count%200==0)//写天块，年块
+		{
+			if( ( err = hd_write(day_data, sizeof(day_data), sizeof(day_data), first_seek ) ) < 0 )
+			{
+				printf("hd_write error\n");
+				{
+					DP("debug");
+					return err;
+				}
+			}
+		}
 	}
 	return 0;
+}
+int write_disk()
+{
+	int err;
+	static struct  seek_block block;
+	static enum opera_type get_type;
+	while(1)
+	{
+		err = write_disk1();
+		switch (err)
+		{
+		case BLOCK_ERR_DAY_PASS:
+			block.seek = hd_current_sec_seek + sizeof(day_data) ;
+			block.time = time(NULL);
+			//年块中添加一块
+			if( ( err=block_year_add(&block, get_type) ) < 0)
+			{
+				DP("debug");
+				return err;
+			}
+			hd_current_day_seek = hd_current_sec_seek;
+			memset(day_data, 0, sizeof(day_data));
+			hd_current_sec_seek =hd_current_sec_seek + sizeof(day_data);
+			break;
+		case HD_ERR_FULL:
+			printf("HD_ERR_FULL\n");
+			hd_current_sec_seek =first_seek;
+			break;
+		default:
+			printf("unknow err:%d\n",err);
+			return err;
+			break;
+		}
+	}
+	return 0;
+}
+/***********************************************************
+*功能:获取视频帧数据
+*返回：<0错误  >0视频帧的大小
+ ***********************************************************/
+int get_frame()
+{
+	int seed;
+	while(1)
+	{
+		seed =rand();
+		if(seed>10*1204&&seed<40*1024)
+			break;
+	}
+	struct hd_frame *secdata = (struct hd_frame *)frame_buff;
+	memcpy(secdata->data_head, framehead, sizeof(framehead));
+	secdata->size=seed;
+	if(get_time()%24==0)
+	{
+		secdata->is_I = 1;
+		memset(secdata+sizeof(struct hd_frame), 0xff, seed);
+		return 0;
+	}
+	else
+	{
+		secdata->is_I = 0;
+		memset(secdata+sizeof(struct hd_frame), 0xaa , seed);
+		return 0;
+	}
+	return BLOCK_ERR_GET_FRAME;
+}
+inline int get_time()
+{
+	static unsigned int time=25;
+	time++;
+	return time/25;
 }

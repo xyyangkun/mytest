@@ -8,6 +8,7 @@
 #ifndef BLOCK_H_
 #define BLOCK_H_
 #include <stdio.h>
+#include <stdlib.h>
 #include <fcntl.h>
 #include <string.h>
 //在内存中建立文件测试
@@ -81,6 +82,7 @@ struct hd_frame
 #define HD_ERR_SEEK -2			//硬盘seek出错
 #define HD_ERR_WRITE -3			//硬盘write出错
 #define HD_ERR_OVER  -100  		//!!数据溢出缓冲区
+#define HD_ERR_FULL  -101		//硬盘空间不路，不够写入最后一帧数据。
 extern int dh_init();
 extern int hd_write(char *buf, int bufsize, int buf_size, long long seek);
 extern int hd_read (char *buf, int bufsize, int buf_size, long long seek);
@@ -100,8 +102,21 @@ extern int block_year_get();
 #define BLOCK_ERR_NULL -7		//传入指针参数为NULL
 #define BLOCK_ERR_ZERO -8		//传入指针参数有效，但数据区全为0
 #define BLOCK_ERR_DAY_SEC_MUT -9		//天块中一个秒块的位置有多个秒块对应。有可能的情况是1、一秒有多个I帧2、系统时间出错，向前走了
-
 #define BLOCK_ERR_READ_TYPE -10	//读取数据块类型出错误
+#define BLOCK_ERR_GET_FRAME -11	//获取视频帧错误
+
+#define BLOCK_ERR_UNKNOW_TIME -1000		//未知道的时间错误：可能系统时间回到1970,也可能其它错误
+#define BLOCK_ERR_DAY_PASS -1001		//今天过去了。让watch重启吧。
+int get_frame();
+int get_time();
+
+
+#define DP(fmt...)	\
+	do{\
+		printf(fmt);\
+		printf("function:[%s],line:%d: \n",__FUNCTION__,__LINE__);\
+	}while(0)
+
 #endif /* BLOCK_H_ */
 
 
