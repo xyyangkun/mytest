@@ -21,7 +21,7 @@ static char year_data[(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCK
 static char day_data_bac[(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
 static char day_data[(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
 static char frame_buff[BUFSIZE];
-static long long first_seek=first_block+sizeof(year_data)+sizeof(day_data_bac);
+static long long first_seek=first_block+(sizeof(year_data)+sizeof(day_data_bac) + BLOCKSIZE - 1 )/BLOCKSIZE;
 
 /**********************************************************
  * 初始化硬盘读写功能
@@ -525,8 +525,8 @@ int block_day_add(struct  seek_block *block)
 			return BLOCK_ERR_NULL;
 	if(block->time==0 || block->seek==0)
 			return BLOCK_ERR_ZERO;
-	//memcmp(daydata, day_head, 8)!=0,
-	if(*(long long *)daydata != *(long long *)day_head)
+
+	if(memcmp(day_data, day_head, 8)!=0)
 	{
 		return BLOCK_ERR_DATA_HEAD;
 	}
@@ -589,6 +589,7 @@ int write_disk1()
 	int buff_size;
 	int buff_blocks;//buff占有块数
 	long long seek_tmp;
+	bool start=false;
 	//在年块中找到当前天块的位置
 	if(yearblock->year_queue_data.queue_size ==0)//新硬盘
 	{
@@ -603,7 +604,15 @@ int write_disk1()
 		}
 		hd_current_day_seek = first_seek;
 		memset(day_data, 0, sizeof(day_data));
-		hd_current_sec_seek = first_seek+sizeof(day_data);
+		hd_current_sec_seek = first_seek+( sizeof(day_data) + BLOCKSIZE - 1 ) / BLOCKSIZE;
+		//写天块头
+		memset(day_data , 0 , sizeof(day_data));
+		memcpy( day_data, day_head, sizeof(day_head) ); //数据头
+		if(hd_write(day_data, sizeof(day_data), sizeof(day_data), first_seek) < 0)
+		{
+			printf("hd_write error\n");
+			return -1;
+		}
 		goto write_sec;
 	}
 	get_type = tail;
@@ -628,9 +637,10 @@ int write_disk1()
 		return BLOCK_ERR_READ_TYPE;
 	}
 	//在天块中找到当前秒块的位置
+	printf("debug1.1\n");
 	seek_tmp = block_day_read_and_get_seek();
 	if(seek_tmp ==0)
-		hd_current_sec_seek = hd_current_day_seek + sizeof(struct day_block);
+		hd_current_sec_seek = hd_current_day_seek + ( sizeof(day_data) + BLOCKSIZE - 1 ) / BLOCKSIZE;
 	else
 		hd_current_sec_seek = seek_tmp;
 
@@ -656,8 +666,8 @@ write_sec:
 			return err;
 		}
 		sys_time = get_time();
-
-		if(sys_time%SECOFDAY == block.time%SECOFDAY)		/*系统时间和年块中最后一块天块的时间在同一天*/
+		printf("debug: sys_time:%d\n",sys_time);
+		if(sys_time/SECOFDAY == block.time/SECOFDAY)/*系统时间和年块中最后一块天块的时间在同一天*/
 		{
 			goto next1;
 		}
@@ -684,6 +694,10 @@ printf("next1\n");
 			DP("debug");
 			return buff_size;
 		}
+		if(secdata->is_I == 1)
+			start = true;
+		if(!start)
+			continue;
 /**********************************************************************************************************************************************************/
 		//2、判断硬盘的剩余空间是否够写这一帧： \
 						a、满：改hd_current_day_seek和hd_current_sec_seek的值\
@@ -693,19 +707,20 @@ printf("next1\n");
 		seek_tmp = block_day_read_and_get_seek();
 		if(seek_tmp ==0)
 		{
-			DP("DEBUG");
-			hd_current_sec_seek = hd_current_day_seek + sizeof(struct day_block);
+			DP("DEBUG\n");
+			hd_current_sec_seek = hd_current_day_seek + ( sizeof(day_data) + BLOCKSIZE - 1 ) / BLOCKSIZE;
 		}
 		else
 		{
-			DP("DEBUG");
+			DP("DEBUG\n");
 			hd_current_sec_seek = seek_tmp;
 		}
 		if(hd_blocks - hd_current_sec_seek < buff_blocks)//剩下的空间不足够写入此帧数据了
 		{
-			DP("debug\n");
+			DP("DEBUG\n");
 			return HD_ERR_FULL;
 		}
+		printf("debug3.1\n");
 /**********************************************************************************************************************************************************/
 		//3、判断下一块要写入的数据的位置是否是空数据(其实只有满了后才应该判断)：  \
 						a、是空数据 \
@@ -719,16 +734,21 @@ printf("next1\n");
 		err=hd_write(frame_buff, sizeof(frame_buff), buff_size, hd_current_sec_seek);
 		if(err<0)
 		{
-			DP("debug");
+			DP("debug\n");
 			return err;
 		}
+		long long tmp_seek = (buff_size + BLOCKSIZE -1)/BLOCKSIZE;
+		hd_current_sec_seek = hd_current_sec_seek + tmp_seek;
+		printf("hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
 		if(secdata->is_I == 1)
 		{
+			printf("sys_time:%d\n",sys_time);
+			printf("is_I:hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
 			block.time = sys_time;
 			block.seek = hd_current_sec_seek;
-			if( ( err = block_day_add(&block) ) < 0)//是I帧，写入
+			if( ( ( err = block_day_add(&block) ) < 0 ) && (err != BLOCK_ERR_DAY_SEC_MUT ) )//是I帧，写入
 			{
-				DP("debug");
+				DP("debug\n");
 				return err;
 			}
 		}
@@ -758,6 +778,7 @@ int write_disk()
 		switch (err)
 		{
 		case BLOCK_ERR_DAY_PASS:
+			printf("debug BLOCK_ERR_DAY_PASS\n");
 			block.seek = hd_current_sec_seek + sizeof(day_data) ;
 			block.time = time(NULL);
 			//年块中添加一块
@@ -769,10 +790,12 @@ int write_disk()
 			hd_current_day_seek = hd_current_sec_seek;
 			memset(day_data, 0, sizeof(day_data));
 			hd_current_sec_seek =hd_current_sec_seek + sizeof(day_data);
+			return -1;
 			break;
 		case HD_ERR_FULL:
-			printf("HD_ERR_FULL\n");
+			printf("debug HD_ERR_FULL\n");
 			hd_current_sec_seek =first_seek;
+			return -1;
 			break;
 		default:
 			printf("unknow err:%d\n",err);
@@ -798,17 +821,19 @@ int get_frame()
 	struct hd_frame *secdata = (struct hd_frame *)frame_buff;
 	memcpy(secdata->data_head, framehead, sizeof(framehead));
 	secdata->size=seed;
-	if(get_time()%24==0)
+	if(get_time()%2==0)
 	{
+		DP("I frame\n");
 		secdata->is_I = 1;
-		memset(secdata+sizeof(struct hd_frame), 0xff, seed);
-		return 0;
+		memset(frame_buff+sizeof(struct hd_frame), 0xff, seed);
+		return sizeof(struct hd_frame)+seed;
 	}
 	else
 	{
-		secdata->is_I = 0;
-		memset(secdata+sizeof(struct hd_frame), 0xaa , seed);
-		return 0;
+		//DP("P frame\n");
+		secdata->is_I =0;
+		memset(frame_buff+sizeof(struct hd_frame), (unsigned char)(get_time()%24) , seed);
+		return sizeof(struct hd_frame)+seed;
 	}
 	return BLOCK_ERR_GET_FRAME;
 }
@@ -817,4 +842,47 @@ inline int get_time()
 	static unsigned int time=25;
 	time++;
 	return time/25;
+}
+/*
+ * 测试写入的获取视频帧函数
+ */
+int test_getframe_gettime()
+{
+	struct hd_frame *secdata = (struct hd_frame *)frame_buff;
+	int tmp;
+	unsigned char *p=frame_buff + sizeof(struct hd_frame);
+	while(1)
+	{
+		 get_time();
+		 if(0 != get_frame())
+			 break;
+		 if(1 == secdata->is_I)
+		 {
+			 //printf("I frame\n");
+			 for(tmp = 0; tmp < secdata->size; tmp++)
+			 {
+				 if(0xff != p[tmp])
+				 {
+					 printf("I frame wrong\n");
+					 goto err;
+				 }
+			 }
+		 }
+		 else
+		 {
+			 //printf("P frame\n");
+			 for(tmp = 0; tmp < secdata->size; tmp++)
+			 {
+				if (p[0] != p[tmp])
+				{
+					printf("P frame wrong\n");
+					goto err;
+				}
+			 }
+		 }
+
+	}
+err:
+	printf("maybe something is wrong!\n");
+	return 0;
 }

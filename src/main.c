@@ -61,5 +61,6 @@ int main()
 #endif //STDTEST
 	block_init();
 	//test_year_data();
+	//test_getframe_gettime();
 	write_disk();
 }

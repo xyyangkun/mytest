@@ -26,11 +26,14 @@
 #define DATE_OFFSET 8
 #ifdef DEBUG_LOG
 	/*如果测试程序逻辑，可以让天变短点，就一天只有60秒*/
-	#define SECOFDAY 1*60
+	#define SECOFDAY (1*60)
 #else
-	#define SECOFDAY 24*3600
+	#define SECOFDAY (24*3600)
 #endif   /*DEBUG_LOG*/
-
+typedef enum bool{
+	true  = 1,
+	false = 0
+}bool;
 enum block_type{
 	year_block = 1,
 	day_block  = 2,
@@ -98,7 +101,7 @@ extern int block_year_get();
 
 #define BLOCK_ERR_EMPTY -4		//（年块天块中数据）为空，没有有效数据
 #define BLOCK_ERR_FULL -5 		//（年块天块中数据）数据写满了，应该只有年块会写满
-#define BLOCK_ERR_DATA_HEAD -6 	//（年块天块中数据）数据块头错误
+#define BLOCK_ERR_DATA_HEAD -6 	//（年块,天块,秒块中数据）数据块头错误
 #define BLOCK_ERR_NULL -7		//传入指针参数为NULL
 #define BLOCK_ERR_ZERO -8		//传入指针参数有效，但数据区全为0
 #define BLOCK_ERR_DAY_SEC_MUT -9		//天块中一个秒块的位置有多个秒块对应。有可能的情况是1、一秒有多个I帧2、系统时间出错，向前走了

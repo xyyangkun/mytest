@@ -7,7 +7,7 @@
 
 OUT=$(PWD)/debug
 CC=gcc
-
+CFLAGS += -g
 CFLAGS += -D YEARBLOCKTEST
 #CFLAGS += -D STDTEST
 all: block.o main.o
