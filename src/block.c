@@ -589,7 +589,7 @@ int write_disk1()
 	int buff_size;
 	int buff_blocks;//buff占有块数
 	long long seek_tmp;
-	bool start=false;
+	static bool start=false;
 	//在年块中找到当前天块的位置
 	if(yearblock->year_queue_data.queue_size ==0)//新硬盘
 	{
@@ -610,6 +610,7 @@ int write_disk1()
 		memcpy( day_data, day_head, sizeof(day_head) ); //数据头
 		if(hd_write(day_data, sizeof(day_data), sizeof(day_data), first_seek) < 0)
 		{
+			DP("debug\n");
 			printf("hd_write error\n");
 			return -1;
 		}
@@ -624,7 +625,7 @@ int write_disk1()
 	}
 	hd_current_day_seek = block.seek;//指定当前天块的位置
 	//读取天块的内容到内存中
-	printf("debug1\n");
+	//printf("debug1\n");
 	err = block_read(day_data, sizeof(day_data) ,hd_current_day_seek, &this_block_type);
 	if(err < 0)
 	{
@@ -637,7 +638,7 @@ int write_disk1()
 		return BLOCK_ERR_READ_TYPE;
 	}
 	//在天块中找到当前秒块的位置
-	printf("debug1.1\n");
+	//printf("debug1.1\n");
 	seek_tmp = block_day_read_and_get_seek();
 	if(seek_tmp ==0)
 		hd_current_sec_seek = hd_current_day_seek + ( sizeof(day_data) + BLOCKSIZE - 1 ) / BLOCKSIZE;
@@ -645,7 +646,7 @@ int write_disk1()
 		hd_current_sec_seek = seek_tmp;
 
 
-	printf("debug2\n");
+	//printf("debug2\n");
 	//写数据
 write_sec:
 	while(1)
@@ -658,22 +659,23 @@ write_sec:
 											A、提前不超过20分钟：认为是系统对时错误，或其它错误，此时间应该写入今天的块，而不是昨天\
 											B、提前超过20分钟：：这是神马错误？？？？
 		get_type = tail;
-		printf("debug2.1\n");
+		//printf("debug2.1\n");
 		err = block_year_get(&block,get_type);
 		if(err < 0)
 		{
+			DP("debug\n");
 			printf("block_year_get err\n");
 			return err;
 		}
 		sys_time = get_time();
-		printf("debug: sys_time:%d\n",sys_time);
+		//printf("debug: sys_time:%d\n",sys_time);
 		if(sys_time/SECOFDAY == block.time/SECOFDAY)/*系统时间和年块中最后一块天块的时间在同一天*/
 		{
 			goto next1;
 		}
 		else if(sys_time > block.time)//"今天"过去了
 		{
-			printf("debug2.2\n");
+			DP("debug\n");
 			//hd_current_sec_seek;
 			return BLOCK_ERR_DAY_PASS;
 		}
@@ -682,13 +684,16 @@ write_sec:
 			goto next1;
 		}
 		else
+		{
+			DP("debug\n");
 			return BLOCK_ERR_UNKNOW_TIME;
-		printf("debug3\n");
+		}
+		//printf("debug3\n");
 /**********************************************************************************************************************************************************/
 
 
 next1:
-printf("next1\n");
+//printf("next1\n");
 		if( (buff_size = get_frame())<0)
 		{
 			DP("debug");
@@ -703,7 +708,7 @@ printf("next1\n");
 						a、满：改hd_current_day_seek和hd_current_sec_seek的值\
 						b、未满
 		buff_blocks = ( buff_size + BLOCKSIZE - 1 ) / BLOCKSIZE;
-		printf("buff_blocks:%d\n",buff_blocks);
+		//printf("buff_blocks:%d\n",buff_blocks);
 		seek_tmp = block_day_read_and_get_seek();
 		if(seek_tmp ==0)
 		{
@@ -720,7 +725,7 @@ printf("next1\n");
 			DP("DEBUG\n");
 			return HD_ERR_FULL;
 		}
-		printf("debug3.1\n");
+		//printf("debug3.1\n");
 /**********************************************************************************************************************************************************/
 		//3、判断下一块要写入的数据的位置是否是空数据(其实只有满了后才应该判断)：  \
 						a、是空数据 \
@@ -739,7 +744,7 @@ printf("next1\n");
 		}
 		long long tmp_seek = (buff_size + BLOCKSIZE -1)/BLOCKSIZE;
 		hd_current_sec_seek = hd_current_sec_seek + tmp_seek;
-		printf("hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
+		//printf("hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
 		if(secdata->is_I == 1)
 		{
 			printf("sys_time:%d\n",sys_time);
@@ -758,10 +763,8 @@ printf("next1\n");
 			if( ( err = hd_write(day_data, sizeof(day_data), sizeof(day_data), first_seek ) ) < 0 )
 			{
 				printf("hd_write error\n");
-				{
-					DP("debug");
-					return err;
-				}
+				DP("debug");
+				return err;
 			}
 		}
 	}
@@ -777,9 +780,9 @@ int write_disk()
 		err = write_disk1();
 		switch (err)
 		{
-		case BLOCK_ERR_DAY_PASS:
+		case BLOCK_ERR_DAY_PASS:/*应该写入天块了*/
 			printf("debug BLOCK_ERR_DAY_PASS\n");
-			block.seek = hd_current_sec_seek + sizeof(day_data) ;
+			block.seek = hd_current_sec_seek  ;
 			block.time = time(NULL);
 			//年块中添加一块
 			if( ( err=block_year_add(&block, get_type) ) < 0)
@@ -789,8 +792,15 @@ int write_disk()
 			}
 			hd_current_day_seek = hd_current_sec_seek;
 			memset(day_data, 0, sizeof(day_data));
+			memcpy(day_data, day_head, sizeof(day_head)); //数据头
+			if (hd_write(day_data, sizeof(day_data), sizeof(day_data),
+					hd_current_sec_seek) < 0)
+			{
+				printf("hd_write error\n");
+				return -1;
+			}
 			hd_current_sec_seek =hd_current_sec_seek + sizeof(day_data);
-			return -1;
+			//return -1;
 			break;
 		case HD_ERR_FULL:
 			printf("debug HD_ERR_FULL\n");
@@ -821,7 +831,7 @@ int get_frame()
 	struct hd_frame *secdata = (struct hd_frame *)frame_buff;
 	memcpy(secdata->data_head, framehead, sizeof(framehead));
 	secdata->size=seed;
-	if(get_time()%2==0)
+	if(get_time()%24==0)
 	{
 		DP("I frame\n");
 		secdata->is_I = 1;

@@ -2,7 +2,7 @@
 #sudo mount -t ramfs -o size=1000M,maxsize=1100M ramfs /mnt/ramfs
 #sudo dd if=/dev/zero of=a.img bs=1000M count=1
 #在/mnt/ramfs中写大文件
-#
+#1048576000
 #
 
 OUT=$(PWD)/debug
