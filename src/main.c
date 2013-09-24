@@ -12,6 +12,7 @@ int main()
 	long long blocks;
 	static char buf[512];
 	int tmp;
+	//test_print_size();
 	if(dh_init()<0)
 	{
 		perror("dh init");
@@ -60,7 +61,7 @@ int main()
 	printf("check ok\n");
 #endif //STDTEST
 	block_init();
-	//test_year_data();
+	//test_year_data2();
 	//test_getframe_gettime();
 	write_disk();
 }
