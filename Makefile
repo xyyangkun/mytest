@@ -6,12 +6,19 @@
 #
 
 OUT=$(PWD)/debug
+ifdef TEST_RAM
 CC=gcc
-CFLAGS += -g
-CFLAGS += -D YEARBLOCKTEST
+#CFLAGS += -D YEARBLOCKTEST
 #CFLAGS += -D STDTEST
+else
+CC=arm-hisiv200-linux-gcc
+CFLAGS += -g
+CFLAGS += -Isrc -L$(PWD)/lib -lsda -l sgutils2 -l media_api -lpthread
+endif
+
 all: block.o main.o
 	$(CC)  $(OUT)/block.o $(OUT)/main.o $(CFLAGS)  -o  $(OUT)/main
+	cp $(OUT)/main /mnt/yk
 	
 block.o: src/block.c src/block.h
 	$(CC) $(CFLAGS) -c  src/block.c -o $(OUT)/block.o

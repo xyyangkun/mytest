@@ -12,7 +12,7 @@
 #include <fcntl.h>
 #include <string.h>
 //在内存中建立文件测试
-#define TEST_RAM
+//#define TEST_RAM
 
 //#define DEBUG_LOG
 /*硬盘默认块大小512字节  这个值可以说是不能改的*/
@@ -87,8 +87,8 @@ struct hd_frame
 #define HD_ERR_OVER  -100  		//!!数据溢出缓冲区
 #define HD_ERR_FULL  -101		//硬盘空间不路，不够写入最后一帧数据。
 extern int dh_init();
-extern int hd_write(char *buf, int bufsize, int buf_size, long long seek);
-extern int hd_read (char *buf, int bufsize, int buf_size, long long seek);
+extern int sda_write(char *buf, int bufsize, int buf_size, long long seek);
+extern int sda_read (char *buf, int bufsize, int buf_size, long long seek);
 extern int hd_getsize(long long *blocks);
 enum opera_type{
 	head = 0,
@@ -110,7 +110,6 @@ extern int block_year_get();
 
 #define BLOCK_ERR_UNKNOW_TIME -1000		//未知道的时间错误：可能系统时间回到1970,也可能其它错误
 #define BLOCK_ERR_DAY_PASS -1001		//今天过去了。让watch重启吧。
-int get_frame();
 int get_time();
 
 
