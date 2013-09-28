@@ -13,12 +13,14 @@ CC=gcc
 else
 CC=arm-hisiv200-linux-gcc
 CFLAGS += -g
-CFLAGS += -Isrc -L$(PWD)/lib -lsda -l sgutils2 -l media_api -lpthread
+CFLAGS += -Isrc -Iextern_src/include -L$(PWD)/lib -lsda -l sgutils2 -l media_api -lgtlog -lpthread 
 endif
-
-all: block.o main.o
-	$(CC)  $(OUT)/block.o $(OUT)/main.o $(CFLAGS)  -o  $(OUT)/main
+all:main read
 	cp $(OUT)/main /mnt/yk
+	cp $(OUT)/read /mnt/yk
+main: block.o main.o
+	$(CC)  $(OUT)/block.o $(OUT)/main.o $(CFLAGS)  -o  $(OUT)/main
+
 	
 block.o: src/block.c src/block.h
 	$(CC) $(CFLAGS) -c  src/block.c -o $(OUT)/block.o
@@ -26,5 +28,10 @@ block.o: src/block.c src/block.h
 main.o: src/main.c src/block.h
 	$(CC) $(CFLAGS) -c src/main.c -o $(OUT)/main.o
 	
+read:read.o block.o
+	$(CC)  $(OUT)/block.o $(OUT)/read.o $(CFLAGS)  -o  $(OUT)/read
+	
+read.o:
+	$(CC) $(CFLAGS) -c src/read.c -o $(OUT)/read.o
 clean:
 	rm $(OUT)/*

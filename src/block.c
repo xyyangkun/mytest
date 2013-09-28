@@ -21,7 +21,7 @@ static char year_data[(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCK
 static char day_data_bac[(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
 static char day_data[    (sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
 static char frame_buff[BUFSIZE];
-static long long first_seek=first_block+(sizeof(year_data)+sizeof(day_data_bac) + BLOCKSIZE - 1 )/BLOCKSIZE;
+const static long long first_seek=first_block+(sizeof(year_data)+sizeof(day_data_bac) + BLOCKSIZE - 1 )/BLOCKSIZE;
 
 
 static const struct year_block *yearblock =  (struct year_block *)year_data;
@@ -33,6 +33,8 @@ static char *hd_frame_buff=NULL;
 #ifndef TEST_RAM
 #include "media_api.h"
 #include "mshmpool.h"
+#include "gtlog.h"
+
 #define MEDIA_VIDEO		0x01		//视频数据
 #define MEDIA_AUDIO	0x02		//音频数据
 
@@ -64,21 +66,32 @@ typedef struct{
 }enc_frame_t;
 
 media_source_t media;
-extern int get_hd_fd();
+/*******************************************************************************
+ * 由数据的大小返回 此数据在硬盘上所占的块的数量
+ *******************************************************************************/
+#define get_block_num(buffsize) (( (buffsize) + BLOCKSIZE -1)/BLOCKSIZE )
+/*******************************************************************************
+ * 初始化硬盘
+ *******************************************************************************/
 extern int init_sda();
+/*******************************************************************************
+ * 获取读写硬盘函数的文件描述符
+ *******************************************************************************/
+extern int get_hd_fd();
+
 /********************************************************************************
  * 读硬盘数据，  大于32块，会分开读
  * fd,硬盘文件描述符， seek要读数据开始的块，  blk_num,块的数量， read_buf缓冲区
  * 返回值：读的字节数， -1失败
  ********************************************************************************/
-extern int ha_read(int fd, long long  seek, unsigned int blk_num, char *read_buf,unsigned int buf_size);
+extern int hd_read(int fd, long long  seek, unsigned int blk_num, char *read_buf,unsigned int buf_size);
 /********************************************************************************
  * 写硬盘数据，  大于32块，会分开读
  * fd,硬盘文件描述符， seek要读数据开始的块，  blk_num,块的数量， read_buf缓冲区
  * 返回值：写的字节数， -1失败
  ********************************************************************************/
+extern int hd_write(int fd, long long  seek, unsigned int blk_num, char *write_buf,unsigned int buf_size);
 #define MAXREADBLOCK 32
-extern int ha_write(int fd, long long  seek, unsigned int blk_num, char *write_buf,unsigned int buf_size);
 static int get_frame();
 #endif
 /**********************************************************
@@ -129,8 +142,19 @@ int sda_write(char *buf, int bufsize, int buf_size, long long seek)
 	if(write(hd_fd, buf, blocks*BLOCKSIZE) < 0)
 		return HD_ERR_WRITE;
 #else
+	//bug!!!
+	if(memcmp(buf, day_head, sizeof(day_head)) == 0)
+	{
+		if(seek!=2046)
+		{
+			printf("day seek err!!!->%lld\n",seek);
+			exit(1);
+		}
+		else
+			printf("day write success!!!\n");
+	}
 	//真实硬盘代码
-	if( hd_write(get_hd_fd(), seek, blocks,  buf, buf_size) < 0)
+	if( hd_write(get_hd_fd(), seek, blocks,  buf, blocks*BLOCKSIZE) < 0)
 		return -1;
 #endif
 	return 0;
@@ -144,7 +168,7 @@ int sda_write(char *buf, int bufsize, int buf_size, long long seek)
 int sda_read(char *buf, int bufsize, int block_num, long long seek)
 {
 	//每块512字节，计算有多少块。
-	int blocks;
+	//int blocks;
 #ifdef TEST_RAM
 	if(hd_fd<0){
 		return HD_ERR_FD;
@@ -157,9 +181,9 @@ int sda_read(char *buf, int bufsize, int block_num, long long seek)
 
 #endif
 	//计算数据占有的512字节的块数
-	blocks = ( block_num + BLOCKSIZE -1)/BLOCKSIZE;
+	//blocks = ( block_num + BLOCKSIZE -1)/BLOCKSIZE;
 	//判断读缓冲区是不是够大
-	if(blocks*BLOCKSIZE>bufsize)
+	if(block_num*BLOCKSIZE>bufsize)
 		return HD_ERR_OVER;
 #ifdef TEST_RAM
 	//开始读
@@ -167,7 +191,7 @@ int sda_read(char *buf, int bufsize, int block_num, long long seek)
 		return HD_ERR_WRITE;
 #else
 	//真实硬盘代码
-	if( hd_read(get_hd_fd(), seek, blocks,  buf, blocks*BLOCKSIZE) < 0)
+	if( hd_read(get_hd_fd(), seek, block_num,  buf, block_num*BLOCKSIZE) < 0)
 		return -1;
 #endif
 	return 0;
@@ -195,7 +219,7 @@ int hd_getsize(long long *blocks)
 #else
 	//真实硬盘代码
 	//bug fix!!!!!!
-	*blocks = hd_blocks = 312581808/16;//160G
+	*blocks = hd_blocks = 312581808/144;//160G
 #endif
 	return 0;
 }
@@ -276,27 +300,27 @@ int block_init()
 	//从第0块开始读1块，用大小512字节的缓冲区
 	if( (err=sda_read(buf, sizeof(buf),1, 0)) < 0 )
 	{
-	 printf("hd_read error\n");
+	 gtlogerr("hd_read error\n");
 	}
 	if(memcmp(buf+256, "gtalarm", 7)== 0)
 #endif //YEARBLOCKTEST
 	{
-		printf("this is a new disk\n");
+		printf("this is a new disk!!!!\n");
 		struct year_block *yeardata=(struct year_block *) year_data ;
 		memset(buf, 0, sizeof(buf));
 		memcpy(buf, "gtalarm", 7);
 		if( (err=sda_write(buf, sizeof(buf), sizeof(buf), 0)) < 0 )
 		{
-		 printf("hd_read error\n");
+			gtlogerr("hd_read error\n");
 		}
 		//写年块头
 		struct day_block *daydata=(struct day_block *) day_data ;
 		memset(year_data , 0 , sizeof(year_data));
-		memcpy( yeardata->year_head, day_head, sizeof(day_head) ); //数据头
+		memcpy( yeardata->year_head, year_head, sizeof(year_head) ); //数据头
 		//yeardata->year_queue_data.queue_size=0;
 		if(sda_write(year_data, sizeof(year_data), sizeof(year_data), first_block) < 0)
 		{
-			printf("hd_write error\n");
+			gtlogerr("hd_write error\n");
 			return -1;
 		}
 		//写天块头
@@ -304,7 +328,7 @@ int block_init()
 		memcpy( day_data, day_head, sizeof(day_head) ); //数据头
 		if(sda_write(day_data, sizeof(day_data), sizeof(day_data), first_seek) < 0)
 		{
-			printf("hd_write error\n");
+			gtlogerr("hd_write error\n");
 			return -1;
 		}
 	}
@@ -312,13 +336,7 @@ int block_init()
 	enum block_type this_block_type;
 	if( block_read((char *)year_data, sizeof(year_data) , first_block, &this_block_type ) < 0)
 	{
-		printf("block_read\n");
-		return -1;
-	}
-	//day_data
-	if( block_read((char *)day_data, sizeof(day_data) , first_seek, &this_block_type ) < 0)
-	{
-		printf("block_read\n");
+		gtlogerr("block_read\n");
 		return -1;
 	}
 	return 0;
@@ -621,23 +639,24 @@ int block_day_add(struct  seek_block *block)
 	}
 	//复制数据
 	index = block->time%SECOFDAY;
+	printf("index:%d\n",index);
 	if(daydata->seek_block_data[index].seek !=0 )
 		return BLOCK_ERR_DAY_SEC_MUT;//当前的秒块位置有值了。
 	else
-		memcpy(&daydata->seek_block_data[index], block, sizeof(struct  seek_block));
+		memcpy(&(daydata->seek_block_data[index]), block, sizeof(struct  seek_block));
 
 
 	//每tmp == x次写入一次天块。  hd_current_day_seek
 	tmp++;
-	if(tmp >= 300)
+	if(tmp >= 10)
 	{
+		gtloginfo("day_data write->day.seek:%lld,sec.seek:%lld,index:%d\n", \
+				hd_current_day_seek,block->seek,index);
 		tmp = 0;
-		enum block_type this_block_type;
 		//day_data
-		if( ( err = sda_write(day_data, sizeof(day_data), sizeof(day_data), first_seek ) ) < 0 )
+		if( ( err = sda_write(day_data, sizeof(day_data), sizeof(day_data), hd_current_day_seek ) ) < 0 )
 		{
-			printf("hd_write error\n");
-			DP("debug");
+			gtlogerr("hd_write day_data error\n");
 			return err;
 		}
 	}
@@ -655,10 +674,16 @@ long long  block_day_read_and_get_seek()
 	int i;
 	for(i = SECOFDAY; i > 0; i--)//
 	{
+		//printf("i:%d,time:%d,seek:%lld\n",i,seek_block_data[i].time,seek_block_data[i].seek);
+		//continue;
 		if(seek_block_data[i].seek !=0 )//此算法要牺牲最后1S的视频数据
+		{
+			printf("find sec of dayindex:%d:%lld\n",i,seek_block_data[i].seek);
 			return seek_block_data[i].seek;
+		}
 	}
-	printf("day block is emputy\n");
+	//exit(1);
+	printf("!!!!day block is emputy\n");
 	return 0;//不前天块中没有有效数据
 }
 /***********************************************************
@@ -684,9 +709,13 @@ static int write_disk1()
 write_sec:
 	while(1)
 	{
+
+
+
+		//这个检测有点多余
 		if(hd_blocks< hd_current_sec_seek)
 		{
-			printf("hd_blocks:%lld,hd_current_sec_seek:%lld\n",hd_blocks,hd_current_sec_seek );
+			gtlogerr("hd_blocks:%lld,hd_current_sec_seek:%lld\n",hd_blocks,hd_current_sec_seek );
 			return -19;
 		}
 /**********************************************************************************************************************************************************/
@@ -701,8 +730,8 @@ write_sec:
 		err = block_year_get(&block,get_type);
 		if(err < 0)
 		{
-			DP("debug\n");
-			printf("block_year_get err\n");
+			gtloginfo("debug\n");
+			gtloginfo("block_year_get err\n");
 			return err;
 		}
 		sys_time = get_time();
@@ -713,19 +742,20 @@ write_sec:
 		}
 		else if(sys_time > block.time)//"今天"过去了
 		{
-			DP("sys_time:%d,block.time:%d\n",sys_time,block.time);
-			printf("hd_current_sec_seek:%lld, hd_current_day_seek:%lld\n",\
+			gtloginfo("sys_time:%d,block.time:%d\n",sys_time,block.time);
+			gtloginfo("hd_current_sec_seek:%lld, hd_current_day_seek:%lld\n",\
 					hd_current_sec_seek,hd_current_day_seek);
 			//hd_current_sec_seek;
 			return BLOCK_ERR_DAY_PASS;
 		}
 		else if(block.time - sys_time >60*20)//提前不超过20分钟
 		{
+			printf("go head\n");
 			goto next1;
 		}
 		else
 		{
-			DP("debug\n");
+			gtlogerr("BLOCK_ERR_UNKNOW_TIME");
 			return BLOCK_ERR_UNKNOW_TIME;
 		}
 		//printf("debug3\n");
@@ -733,10 +763,10 @@ write_sec:
 
 
 next1:
-//printf("next1\n");
+
 		if( (buff_size = get_frame())<0)
 		{
-			DP("debug");
+			gtlogerr("get frame err");
 			return buff_size;
 		}
 		if( ( (struct hd_frame *)hd_frame_buff )->is_I == 1)
@@ -751,7 +781,7 @@ next1:
 		//printf("buff_blocks:%d\n",buff_blocks);
 		if(hd_blocks - hd_current_sec_seek < buff_blocks)//剩下的空间不足够写入此帧数据了
 		{
-			DP("DEBUG\n");
+			gtlogerr("disk HD_ERR_FULL\n");
 			return HD_ERR_FULL;
 		}
 		//printf("debug3.1\n");
@@ -762,32 +792,34 @@ next1:
 									A、是秒块:从day_data_bac，中清除此位置\
 									B、是天块：把天读到day_data_bac中，同时写入到对应的位置
 /**********************************************************************************************************************************************************/
-		//些步暂时没有。。
-
+		if( (hd_current_day_seek >= hd_current_sec_seek) )//
+		{
+				printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n");
+		}
 		//4、写数据
 		err=sda_write(hd_frame_buff, sizeof(frame_buff), buff_size, hd_current_sec_seek);
 		if(err<0)
 		{
-			DP("debug\n");
+			gtlogerr("debug\n");
 			return err;
 		}
+		printf("hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
 		long long tmp_seek = (buff_size + BLOCKSIZE -1)/BLOCKSIZE;
 		hd_current_sec_seek = hd_current_sec_seek + tmp_seek;
-		//printf("hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
 		if(( (struct hd_frame *)hd_frame_buff )->is_I == 1)
 		{
-			printf("sys_time:%d\n",sys_time);
-			printf("is_I:hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
+			gtloginfo("sys_time:%d\n",sys_time);
+			gtloginfo("is_I:hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
 			block.time = sys_time;
 			block.seek = hd_current_sec_seek;
 			if( ( ( err = block_day_add(&block) ) < 0 ) && (err != BLOCK_ERR_DAY_SEC_MUT ) )//是I帧，写入
 			{
-				DP("debug\n");
+				gtlogerr("debug\n");
 				return err;
 			}
 		}
 
-		//1、是不是应该检查秒块是不是覆盖了天块。在覆盖前把最前面的天块复制到day_block_bac位置2、覆盖天块时，是不是应该在年块中把这个天块删除
+
 
 	}
 	return 0;
@@ -800,16 +832,21 @@ int write_disk()
 	static enum block_type this_block_type;
 	long long seek_tmp;
 
+
+	printf("day_data:%d,year_data:%d\n",sizeof(day_data),sizeof(year_data));
+	printf("block of day_data:%d,block of year_data:%d\n", \
+			(sizeof(day_data) + BLOCKSIZE - 1) / BLOCKSIZE , \
+			(sizeof(year_data) + BLOCKSIZE - 1) / BLOCKSIZE );
 	//在年块中找到当前天块的位置
 	if(yearblock->year_queue_data.queue_size ==0)//新硬盘
 	{
-		printf("new disk1\n");
+		gtloginfo("new disk1\n");
 		block.seek = first_seek;
 		block.time = get_time();
 		//年块中添加一块
 		if( ( err=block_year_add(&block, get_type) ) < 0)
 		{
-			DP("debug\n");
+			gtloginfo("debug\n");
 			return err;
 		}
 		hd_current_day_seek = first_seek;
@@ -820,7 +857,7 @@ int write_disk()
 		memcpy( day_data, day_head, sizeof(day_head) ); //数据头
 		if(sda_write(day_data, sizeof(day_data), sizeof(day_data), first_seek) < 0)
 		{
-			DP("debug\n");
+			gtloginfo("debug\n");
 			printf("hd_write error\n");
 			return -1;
 		}
@@ -831,32 +868,36 @@ int write_disk()
 		err = block_year_get(&block, get_type);
 		if (err < 0)
 		{
-			printf("block_year_get err\n");
+			gtlogerr("block_year_get err\n");
 			return err;
 		}
 		hd_current_day_seek = block.seek; //指定当前天块的位置
+		printf("hd_current_day_seek:%lld\n",hd_current_day_seek);
 		//读取天块的内容到内存中
 		err = block_read(day_data, sizeof(day_data), hd_current_day_seek,
 				&this_block_type);
 		if (err < 0)
 		{
-			DP("debug");
+			gtloginfo("debug");
 			return err;
 		}
 		if (this_block_type != day_block)
 		{
-			printf("read type err!!!\n");
+			gtlogerr("read type err!!!\n");
 			return BLOCK_ERR_READ_TYPE;
 		}
 		//在天块中找到当前秒块的位置
-		//printf("debug1.1\n");
 		seek_tmp = block_day_read_and_get_seek();
 		if (seek_tmp == 0)
+		{
+			printf("read secseek of day err!!!\n");
+			//return 0;
 			hd_current_sec_seek = hd_current_day_seek
 					+ (sizeof(day_data) + BLOCKSIZE - 1) / BLOCKSIZE;
+		}
 		else
 			hd_current_sec_seek = seek_tmp;
-printf("hd_current_sec_seek:%lld\n",hd_current_sec_seek);
+		gtloginfo("hd_current_sec_seek:%lld\n",hd_current_sec_seek);
 //return 0;
 	}
 
@@ -867,11 +908,11 @@ printf("hd_current_sec_seek:%lld\n",hd_current_sec_seek);
 	err=connect_media_read(&media ,0x30000, "video", /*MSHMPOOL_LOCAL_USR*/1);
 	if(err!=0)
 	{
-		printf("error in connect media read and exit\n");
+		gtlogerr("error in connect media read and exit\n");
 		return -1;
 	}
 	else
-		printf("connect success\n");
+		gtloginfo("connect success\n");
 
 	while(1)
 	{
@@ -879,13 +920,13 @@ printf("hd_current_sec_seek:%lld\n",hd_current_sec_seek);
 		switch (err)
 		{
 		case BLOCK_ERR_DAY_PASS:/*应该写入天块了*/
-			printf("debug BLOCK_ERR_DAY_PASS\n");
+			gtloginfo("debug BLOCK_ERR_DAY_PASS\n");
 			block.seek = hd_current_sec_seek  ;
 			block.time = get_time();
 			//年块中添加一块
 			if( ( err=block_year_add(&block, get_type) ) < 0)
 			{
-				DP("debug");
+				gtloginfo("block_year_add->seek:%lld,time:%d\n",block.seek,block.time);
 				return err;
 			}
 			hd_current_day_seek = hd_current_sec_seek;
@@ -895,23 +936,23 @@ printf("hd_current_sec_seek:%lld\n",hd_current_sec_seek);
 			if (sda_write(day_data, sizeof(day_data), sizeof(day_data),
 					hd_current_sec_seek) < 0)
 			{
-				printf("hd_write error\n");
+				gtlogerr("hd_write error\n");
 				return -1;
 			}
 			hd_current_sec_seek =hd_current_sec_seek + (sizeof(day_data) + BLOCKSIZE - 1)/BLOCKSIZE;
-			printf("sizeof day_data:%d\n",sizeof(day_data));
-			printf("hd_current_sec_seek:%lld, hd_current_day_seek:%lld\n",\
+			gtloginfo("sizeof day_data:%d\n",sizeof(day_data));
+			gtloginfo("hd_current_sec_seek:%lld, hd_current_day_seek:%lld\n",\
 								hd_current_sec_seek,hd_current_day_seek);
-			//return -1;
+			return -1;
 			break;
 		case HD_ERR_FULL:
-			printf("debug HD_ERR_FULL\n");
+			gtloginfo("debug HD_ERR_FULL\n");
 			hd_current_sec_seek =first_seek;
 			//这应该复制天块了。！！！！！
 			//return -1;
 			break;
 		default:
-			printf("unknow err:%d\n",err);
+			gtlogerr("unknow err:%d\n",err);
 			return err;
 			break;
 		}
@@ -971,7 +1012,7 @@ int get_frame()
 		is_i=1;
 	hd_frame_buff=the_frame_buffer->frame_buf-sizeof(struct hd_frame);
 	int len = the_frame_buffer->len;
-	printf("len:%d\n",len);
+	//printf("len:%d\n",len);
 	memcpy(hd_frame_buff, framehead, sizeof(framehead));
 	struct hd_frame *hdbuf = (struct hd_frame *)(hd_frame_buff);
 	hdbuf->size=len;
@@ -1046,5 +1087,186 @@ int test_print_size()
 	printf("sizeof day_data: %d\n",sizeof(day_data)) ;
 	printf("first_seek:    %lld\n",first_seek);
 	exit(1);
+	return 0;
+}
+void test_write_read()
+{
+#define test 1
+	int err;
+	memset(day_data , 0 , sizeof(day_data));
+	memcpy(day_data, day_head, sizeof(day_head));
+	printf("first_seek:%lld\n",first_seek);
+	printf("block num:%d\n",( sizeof(day_data) + BLOCKSIZE -1)/BLOCKSIZE);
+	int block_num = (sizeof(day_data) + BLOCKSIZE -1)/BLOCKSIZE;
+	int i;
+	for(i=8; i< sizeof(day_data); i++)
+	{
+		day_data[i] = 0xff;
+	}
+#if test
+	if(sda_write(day_data, sizeof(day_data), sizeof(day_data), first_seek) < 0)
+	{
+		gtlogerr("hd_write error\n");
+		exit(1);
+	}
+#else
+	if( hd_write(get_hd_fd(), first_seek, block_num, \
+			day_data, block_num*512) < 0)
+		exit(1);
+#endif
+	memset(day_data , 0 , sizeof(day_data));
+#if test
+	enum block_type this_block_type;
+	err = block_read(day_data, sizeof(day_data), first_seek,
+			&this_block_type);
+	if (err < 0)
+	{
+		gtloginfo("debug");
+		exit(1);
+	}
+	printf("this type:%d\n",this_block_type);
+#else
+	//真实硬盘代码
+	if( hd_read(get_hd_fd(), first_seek, block_num, \
+			day_data, block_num*512) < 0)
+		exit(1);
+#endif
+	for(i=8; i< sizeof(day_data); i++)
+	{
+		if(day_data[i]!=0xff)
+		{
+			printf("%d err\n",i);
+			exit(1);
+		}
+	}
+}
+void test_secseekofday(void *arg)
+{
+	sleep(4);
+	printf("%s\n",arg);
+	while(1){
+		sleep(1);
+		printf("current sec seek:%lld\n",block_day_read_and_get_seek());
+	}
+}
+
+/********fifo***************************************************************/
+static int fd;
+/*初始化管道*/
+int fifo_init()
+{
+	mkfifo("test.264", 0777);
+	int ret;
+	fd = open("test.264", O_WRONLY);
+	if (fd < 0)
+	{
+		perror("openfile error");
+		return -1;
+	}
+	return 0;
+}
+/*写管道*/
+int fifo_write(char *buf, int size)
+{
+	int ret = write(fd, buf, size);
+	if (ret < 0)
+	{
+		//perror("write error\n");
+		return -1;
+	}
+	return ret;
+}
+/*释放管道*/
+void fifo_free()
+{
+	close(fd);
+}
+/********fifo***************************************************************/
+
+
+/*************************************************************************
+ * 功能：读硬盘通过rtsp发送
+ *************************************************************************/
+int read_disk()
+{
+	int err;
+	static struct  seek_block block;
+	static enum opera_type get_type;
+	static enum block_type this_block_type;
+	long long seek_tmp;
+	int tmp;
+
+	printf("read_disk\n");
+	//在年块中找到当前天块的位置
+	if(yearblock->year_queue_data.queue_size ==0)//新硬盘
+	{
+		printf("new disk and exit!!\n");
+		return BLOCK_ERR_READ_NEW_DISK;
+	}else
+	{
+		get_type = tail;
+		err = block_year_get(&block, get_type);
+		if (err < 0)
+		{
+			printf("block_year_get err\n");
+			return err;
+		}
+		hd_current_day_seek = block.seek; //指定当前天块的位置
+		printf("hd_current_day_seek:%lld\n",hd_current_day_seek);
+		//读取天块的内容到内存中
+		err = block_read(day_data, sizeof(day_data), hd_current_day_seek,
+				&this_block_type);
+		if (err < 0)
+		{
+			printf("debug");
+			return err;
+		}
+		if (this_block_type != day_block)
+		{
+			printf("read type err!!!\n");
+			return BLOCK_ERR_READ_TYPE;
+		}
+		//在天块中找到当前秒块的位置
+		for(tmp=0; tmp < SECOFDAY; tmp++)
+		{
+			if(daydata->seek_block_data[tmp].seek != 0 && daydata->seek_block_data[tmp].time != 0)
+			{
+				hd_current_sec_seek = daydata->seek_block_data[tmp].seek;
+				printf("seek:%d\n",daydata->seek_block_data[tmp].seek);
+				break;
+			}
+		}
+	}
+
+	printf("hd_current_sec_seek:%lld\n",hd_current_sec_seek);
+
+	while(1)
+	{
+		usleep(40000);		//25帧
+		err = block_read(frame_buff, sizeof(frame_buff), hd_current_sec_seek,
+				&this_block_type);
+		if (err < 0)
+		{
+			gtloginfo("block read err\n");
+			return err;
+		}
+		else
+			printf("read sec frame ok\n");
+		if(this_block_type != sec_block)
+		{
+			printf("block read is not sec_block\n");
+			return 0;
+		}
+		printf("size:%d\n", ((struct hd_frame *)frame_buff)->size);
+		if(fifo_write(frame_buff + sizeof(struct hd_frame) , ((struct hd_frame *)frame_buff)->size)<0)
+		{
+			printf("fifo write err\n");
+			return 0;
+		}
+		//此块数据在硬盘上占空间的大小
+		int buf_blocks = (((struct hd_frame *)frame_buff)->size + sizeof(struct hd_frame) + BLOCKSIZE -1 )/BLOCKSIZE;
+		//int buf_blocks = get_block_num( ((struct hd_frame *)frame_buff)->size + sizeof(struct hd_frame));
+		hd_current_sec_seek = hd_current_sec_seek + buf_blocks;
+	}
 	return 0;
 }

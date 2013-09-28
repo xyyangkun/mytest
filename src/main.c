@@ -12,18 +12,22 @@ int main()
 	long long blocks;
 	static char buf[512];
 	int tmp;
+	gtopenlog("hd_write");							//打开日志记录
+
 	//test_print_size();
 	if(dh_init()<0)
 	{
 		perror("dh init");
+		gtlogerr("dh init");
 		return -1;
 	}
+#if 1
 	if(hd_getsize(&blocks)<0)
 	{
-		perror("get size");
+		gtlogerr("get size");
 		return -1;
 	}else
-		printf("the disk size:%lld\n",blocks);
+		gtloginfo("the disk size:%lld\n",blocks);
 
 #ifdef STDTEST
 	//构建一定的结构
@@ -61,7 +65,17 @@ int main()
 	printf("check ok\n");
 #endif //STDTEST
 	block_init();
-	//test_year_data2();
+#endif
 	//test_getframe_gettime();
+	//test_write_read();
+#if 1
+	pthread_t ntid;
+	extern void test_secseekofday(void *arg);
+	if(pthread_create(&ntid, NULL, test_secseekofday, "new thread: ")<0)
+	{
+		printf("create pthread err!!\n");
+		return -1;
+	}
+#endif
 	write_disk();
 }

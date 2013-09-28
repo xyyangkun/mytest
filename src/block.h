@@ -11,6 +11,10 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <string.h>
+#ifndef TEST_RAM
+#include <syslog.h>
+#include "gtlog.h"
+#endif
 //在内存中建立文件测试
 //#define TEST_RAM
 
@@ -30,6 +34,7 @@
 #else
 	#define SECOFDAY (24*3600)
 #endif   /*DEBUG_LOG*/
+
 typedef enum bool{
 	true  = 1,
 	false = 0
@@ -118,7 +123,7 @@ int get_time();
 		printf(fmt);\
 		printf("function:[%s],line:%d: \n",__FUNCTION__,__LINE__);\
 	}while(0)
-
+#define BLOCK_ERR_READ_NEW_DISK  -200	//读的是新硬盘
 #endif /* BLOCK_H_ */
 
 
