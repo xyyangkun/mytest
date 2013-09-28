@@ -17,11 +17,12 @@ static long long hd_blocks;
 static long long hd_current_day_seek=0;
 //当前秒块应该写入的位置
 static long long hd_current_sec_seek = 0;
-static char year_data[(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
-static char day_data_bac[(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
-static char day_data[    (sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE*BLOCKSIZE];
+static char year_data[    get_block_num( sizeof( struct year_block ) ) *BLOCKSIZE ];
+static char day_data_bac[ get_block_num( sizeof( struct day_block )  ) *BLOCKSIZE ];
+static char day_data[     get_block_num( sizeof( struct day_block )  ) *BLOCKSIZE ];
 static char frame_buff[BUFSIZE];
-const static long long first_seek=first_block+(sizeof(year_data)+sizeof(day_data_bac) + BLOCKSIZE - 1 )/BLOCKSIZE;
+const static long long first_seek=first_block+ \
+		get_block_num(sizeof(year_data)+sizeof(day_data_bac));
 
 
 static const struct year_block *yearblock =  (struct year_block *)year_data;
@@ -66,10 +67,6 @@ typedef struct{
 }enc_frame_t;
 
 media_source_t media;
-/*******************************************************************************
- * 由数据的大小返回 此数据在硬盘上所占的块的数量
- *******************************************************************************/
-#define get_block_num(buffsize) (( (buffsize) + BLOCKSIZE -1)/BLOCKSIZE )
 /*******************************************************************************
  * 初始化硬盘
  *******************************************************************************/
@@ -133,7 +130,7 @@ int sda_write(char *buf, int bufsize, int buf_size, long long seek)
 
 #endif
 	//计算数据占有的512字节的块数
-	blocks = ( buf_size + BLOCKSIZE -1)/BLOCKSIZE;
+	blocks = get_block_num( buf_size );
 	//判断写缓冲区是不是够大
 	if(blocks*BLOCKSIZE>bufsize)
 		return HD_ERR_OVER;
@@ -142,17 +139,6 @@ int sda_write(char *buf, int bufsize, int buf_size, long long seek)
 	if(write(hd_fd, buf, blocks*BLOCKSIZE) < 0)
 		return HD_ERR_WRITE;
 #else
-	//bug!!!
-	if(memcmp(buf, day_head, sizeof(day_head)) == 0)
-	{
-		if(seek!=2046)
-		{
-			printf("day seek err!!!->%lld\n",seek);
-			exit(1);
-		}
-		else
-			printf("day write success!!!\n");
-	}
 	//真实硬盘代码
 	if( hd_write(get_hd_fd(), seek, blocks,  buf, blocks*BLOCKSIZE) < 0)
 		return -1;
@@ -167,8 +153,6 @@ int sda_write(char *buf, int bufsize, int buf_size, long long seek)
  ***********************************************************/
 int sda_read(char *buf, int bufsize, int block_num, long long seek)
 {
-	//每块512字节，计算有多少块。
-	//int blocks;
 #ifdef TEST_RAM
 	if(hd_fd<0){
 		return HD_ERR_FD;
@@ -180,8 +164,6 @@ int sda_read(char *buf, int bufsize, int block_num, long long seek)
 	//真实硬盘代码
 
 #endif
-	//计算数据占有的512字节的块数
-	//blocks = ( block_num + BLOCKSIZE -1)/BLOCKSIZE;
 	//判断读缓冲区是不是够大
 	if(block_num*BLOCKSIZE>bufsize)
 		return HD_ERR_OVER;
@@ -380,7 +362,7 @@ int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_blo
 	case sec_block:
 		sec_block_head = (struct hd_frame *)buf;
 		if( (err=sda_read(buf+BLOCKSIZE ,bufsize- BLOCKSIZE, \
-				(sec_block_head->size + sizeof(struct hd_frame) + BLOCKSIZE -1)/BLOCKSIZE - 1, seek+1)) < 0 )
+				get_block_num(sec_block_head->size + sizeof(struct hd_frame) ) - 1, seek+1)) < 0 )
 		{
 		 printf("hd_read error\n");
 		 return err;
@@ -391,7 +373,7 @@ int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_blo
 	case day_block:
 		//从天块开始的第二块开始读 （天块大小-1）块数据
 		if( (err=sda_read(buf+BLOCKSIZE ,bufsize- BLOCKSIZE, \
-				(sizeof(struct day_block) + BLOCKSIZE -1)/BLOCKSIZE - 1, seek+1)) < 0 )
+				get_block_num( sizeof(struct day_block) ) - 1, seek+1)) < 0 )
 		{
 		 printf("hd_read error\n");
 		 return err;
@@ -402,7 +384,7 @@ int block_read(char *buf, int bufsize ,long long seek, enum block_type *this_blo
 	case year_block:
 		//从年块开始的第二块开始读 （年块大小-1）块数据
 		if( (err=sda_read(buf+BLOCKSIZE ,bufsize- BLOCKSIZE, \
-				(sizeof(struct year_block) + BLOCKSIZE -1)/BLOCKSIZE - 1, seek+1)) < 0 )
+				get_block_num( sizeof(struct year_block) ) - 1, seek+1)) < 0 )
 		{
 		 printf("hd_read error\n");
 		 return err;
@@ -777,7 +759,7 @@ next1:
 		//2、判断硬盘的剩余空间是否够写这一帧： \
 						a、满：改hd_current_day_seek和hd_current_sec_seek的值\
 						b、未满
-		buff_blocks = ( buff_size + BLOCKSIZE - 1 ) / BLOCKSIZE;
+		buff_blocks = get_block_num( buff_size );//计算此块在硬盘上占用的空间
 		//printf("buff_blocks:%d\n",buff_blocks);
 		if(hd_blocks - hd_current_sec_seek < buff_blocks)//剩下的空间不足够写入此帧数据了
 		{
@@ -804,8 +786,7 @@ next1:
 			return err;
 		}
 		printf("hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
-		long long tmp_seek = (buff_size + BLOCKSIZE -1)/BLOCKSIZE;
-		hd_current_sec_seek = hd_current_sec_seek + tmp_seek;
+		hd_current_sec_seek = hd_current_sec_seek + buff_blocks;
 		if(( (struct hd_frame *)hd_frame_buff )->is_I == 1)
 		{
 			gtloginfo("sys_time:%d\n",sys_time);
@@ -835,8 +816,8 @@ int write_disk()
 
 	printf("day_data:%d,year_data:%d\n",sizeof(day_data),sizeof(year_data));
 	printf("block of day_data:%d,block of year_data:%d\n", \
-			(sizeof(day_data) + BLOCKSIZE - 1) / BLOCKSIZE , \
-			(sizeof(year_data) + BLOCKSIZE - 1) / BLOCKSIZE );
+			get_block_num( sizeof(day_data ) ) , \
+			get_block_num( sizeof(year_data ) ) );
 	//在年块中找到当前天块的位置
 	if(yearblock->year_queue_data.queue_size ==0)//新硬盘
 	{
@@ -851,7 +832,7 @@ int write_disk()
 		}
 		hd_current_day_seek = first_seek;
 		memset(day_data, 0, sizeof(day_data));
-		hd_current_sec_seek = first_seek+( sizeof(day_data) + BLOCKSIZE - 1 ) / BLOCKSIZE;
+		hd_current_sec_seek = first_seek+get_block_num( sizeof(day_data) );
 		//写天块头
 		memset(day_data , 0 , sizeof(day_data));
 		memcpy( day_data, day_head, sizeof(day_head) ); //数据头
@@ -893,7 +874,7 @@ int write_disk()
 			printf("read secseek of day err!!!\n");
 			//return 0;
 			hd_current_sec_seek = hd_current_day_seek
-					+ (sizeof(day_data) + BLOCKSIZE - 1) / BLOCKSIZE;
+					+ get_block_num( sizeof(day_data) );
 		}
 		else
 			hd_current_sec_seek = seek_tmp;
@@ -939,7 +920,7 @@ int write_disk()
 				gtlogerr("hd_write error\n");
 				return -1;
 			}
-			hd_current_sec_seek =hd_current_sec_seek + (sizeof(day_data) + BLOCKSIZE - 1)/BLOCKSIZE;
+			hd_current_sec_seek =hd_current_sec_seek + get_block_num( sizeof(day_data) );
 			gtloginfo("sizeof day_data:%d\n",sizeof(day_data));
 			gtloginfo("hd_current_sec_seek:%lld, hd_current_day_seek:%lld\n",\
 								hd_current_sec_seek,hd_current_day_seek);
@@ -1096,8 +1077,8 @@ void test_write_read()
 	memset(day_data , 0 , sizeof(day_data));
 	memcpy(day_data, day_head, sizeof(day_head));
 	printf("first_seek:%lld\n",first_seek);
-	printf("block num:%d\n",( sizeof(day_data) + BLOCKSIZE -1)/BLOCKSIZE);
-	int block_num = (sizeof(day_data) + BLOCKSIZE -1)/BLOCKSIZE;
+	printf("block num:%d\n",get_block_num( sizeof(day_data) ) );
+	int block_num = get_block_num( sizeof(day_data) );
 	int i;
 	for(i=8; i< sizeof(day_data); i++)
 	{
@@ -1264,9 +1245,8 @@ int read_disk()
 			return 0;
 		}
 		//此块数据在硬盘上占空间的大小
-		int buf_blocks = (((struct hd_frame *)frame_buff)->size + sizeof(struct hd_frame) + BLOCKSIZE -1 )/BLOCKSIZE;
-		//int buf_blocks = get_block_num( ((struct hd_frame *)frame_buff)->size + sizeof(struct hd_frame));
-		hd_current_sec_seek = hd_current_sec_seek + buf_blocks;
+		hd_current_sec_seek = hd_current_sec_seek + \
+				get_block_num( ((struct hd_frame *)frame_buff)->size + sizeof(struct hd_frame));
 	}
 	return 0;
 }
