@@ -201,7 +201,7 @@ int hd_getsize(long long *blocks)
 #else
 	//真实硬盘代码
 	//bug fix!!!!!!
-	*blocks = hd_blocks = 312581808/144;//160G
+	*blocks = hd_blocks = 312581808/* /144 */;//160G
 #endif
 	return 0;
 }
@@ -685,10 +685,7 @@ static int write_disk1()
 	long long seek_tmp;
 	static bool start=false;
 
-
-	//printf("debug2\n");
 	//写数据
-write_sec:
 	while(1)
 	{
 
@@ -708,16 +705,13 @@ write_sec:
 											A、提前不超过20分钟：认为是系统对时错误，或其它错误，此时间应该写入今天的块，而不是昨天\
 											B、提前超过20分钟：：这是神马错误？？？？
 		get_type = tail;
-		//printf("debug2.1\n");
 		err = block_year_get(&block,get_type);
 		if(err < 0)
 		{
-			gtloginfo("debug\n");
-			gtloginfo("block_year_get err\n");
+			gtlogerr("write_disk1 block_year_get err\n");
 			return err;
 		}
 		sys_time = get_time();
-		//printf("debug: sys_time:%d\n",sys_time);
 		if(sys_time/SECOFDAY == block.time/SECOFDAY)/*系统时间和年块中最后一块天块的时间在同一天*/
 		{
 			goto next1;
@@ -727,7 +721,6 @@ write_sec:
 			gtloginfo("sys_time:%d,block.time:%d\n",sys_time,block.time);
 			gtloginfo("hd_current_sec_seek:%lld, hd_current_day_seek:%lld\n",\
 					hd_current_sec_seek,hd_current_day_seek);
-			//hd_current_sec_seek;
 			return BLOCK_ERR_DAY_PASS;
 		}
 		else if(block.time - sys_time >60*20)//提前不超过20分钟
@@ -740,10 +733,7 @@ write_sec:
 			gtlogerr("BLOCK_ERR_UNKNOW_TIME");
 			return BLOCK_ERR_UNKNOW_TIME;
 		}
-		//printf("debug3\n");
 /**********************************************************************************************************************************************************/
-
-
 next1:
 
 		if( (buff_size = get_frame())<0)
@@ -760,23 +750,25 @@ next1:
 						a、满：改hd_current_day_seek和hd_current_sec_seek的值\
 						b、未满
 		buff_blocks = get_block_num( buff_size );//计算此块在硬盘上占用的空间
-		//printf("buff_blocks:%d\n",buff_blocks);
 		if(hd_blocks - hd_current_sec_seek < buff_blocks)//剩下的空间不足够写入此帧数据了
 		{
 			gtlogerr("disk HD_ERR_FULL\n");
 			return HD_ERR_FULL;
 		}
-		//printf("debug3.1\n");
 /**********************************************************************************************************************************************************/
 		//3、判断下一块要写入的数据的位置是否是空数据(其实只有满了后才应该判断)：  \
-						a、是空数据 \
+						a、是空数据(这个不在定情入的时候操作) \
 						b、不是空数据:  \
-									A、是秒块:从day_data_bac，中清除此位置\
+									A、是秒块:从day_data_bac，中清除此位置(这个不在定情入的时候操作)\
 									B、是天块：把天读到day_data_bac中，同时写入到对应的位置
 /**********************************************************************************************************************************************************/
 		if( (hd_current_day_seek >= hd_current_sec_seek) )//
 		{
-				printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n");
+				printf("%d\tBLOCK_INFO_DAY_BLOCK_COVER:\n",BLOCK_INFO_DAY_BLOCK_COVER);
+				gtloginfo("%d\tBLOCK_INFO_DAY_BLOCK_COVER:\n",BLOCK_INFO_DAY_BLOCK_COVER);
+				if(sys_time/SECOFDAY != block.time/SECOFDAY)/*系统时间和年块中最后一块天块的时间在不在同一天，才把年块删了*/
+					block_year_del( get_type );
+				memcpy(day_data_bac, day_data, sizeof(day_data));
 		}
 		//4、写数据
 		err=sda_write(hd_frame_buff, sizeof(frame_buff), buff_size, hd_current_sec_seek);
@@ -789,8 +781,8 @@ next1:
 		hd_current_sec_seek = hd_current_sec_seek + buff_blocks;
 		if(( (struct hd_frame *)hd_frame_buff )->is_I == 1)
 		{
-			gtloginfo("sys_time:%d\n",sys_time);
-			gtloginfo("is_I:hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
+			//gtloginfo("sys_time:%d\n",sys_time);
+			//gtloginfo("is_I:hd_current_sec_seek:%lld,hd_current_day_seek:%lld\n",hd_current_sec_seek,hd_current_day_seek);
 			block.time = sys_time;
 			block.seek = hd_current_sec_seek;
 			if( ( ( err = block_day_add(&block) ) < 0 ) && (err != BLOCK_ERR_DAY_SEC_MUT ) )//是I帧，写入
@@ -799,9 +791,6 @@ next1:
 				return err;
 			}
 		}
-
-
-
 	}
 	return 0;
 }
@@ -924,7 +913,6 @@ int write_disk()
 			gtloginfo("sizeof day_data:%d\n",sizeof(day_data));
 			gtloginfo("hd_current_sec_seek:%lld, hd_current_day_seek:%lld\n",\
 								hd_current_sec_seek,hd_current_day_seek);
-			return -1;
 			break;
 		case HD_ERR_FULL:
 			gtloginfo("debug HD_ERR_FULL\n");
@@ -1166,9 +1154,79 @@ void fifo_free()
 
 
 /*************************************************************************
+ * 功能：读硬盘上年块天块，输出录像时间
+ *************************************************************************/
+int read_disk_print_record_time()
+{
+	int err;
+	int day, sec;
+	int tmp=0;
+	int bool_tmp=0;
+	static enum block_type this_block_type;
+	//判断是不是有数据
+	if( yearblock->year_queue_data.queue_size == 0)
+	{
+		printf("yearblock is emputy!!!\n");
+		gtloginfo("%d\tyearblock is emputy!!!\n",BLOCK_ERR_EMPTY);
+		return BLOCK_ERR_EMPTY;
+	}
+	printf("day of yearblock:%d\n",yearblock->year_queue_data.queue_size);
+	//遍历年块中的数据；
+	for(day=yearblock->year_queue_data.queue_head; \
+		day < yearblock->year_queue_data.queue_head + yearblock->year_queue_data.queue_size; \
+		day++)
+	{
+		if( yearblock->sekk_block_data[day].seek==0 || yearblock->sekk_block_data[day].time == 0)
+		{
+			gtloginfo("%d\tBLOCK_ERR_YEAR_PRINT\n",BLOCK_ERR_YEAR_PRINT);
+			return BLOCK_ERR_YEAR_PRINT;
+		}
+		printf("today's time is:%d --> %s",yearblock->sekk_block_data[day].time, \
+				ctime( &( yearblock->sekk_block_data[day].time ) ) );
+		printf("today's block:\n");
+		//读取天块的内容到内存中
+		err = block_read(day_data, sizeof(day_data), yearblock->sekk_block_data[day].seek,
+				&this_block_type);
+		if (err < 0)
+		{
+			printf("debug");
+			return err;
+		}
+		//输出本天内的连续块
+		for( sec =(yearblock->sekk_block_data[day].time)%SECOFDAY ; \
+			 sec < SECOFDAY ; \
+			 sec++ )
+		{
+			if(bool_tmp == 0)
+			{
+				if( daydata->seek_block_data[sec].seek!=0 || daydata->seek_block_data[sec].time != 0 )
+				{
+
+					printf("start:\tblock:%lld\ttime:%d-->%s",daydata->seek_block_data[sec].seek , \
+							daydata->seek_block_data[sec].time, \
+							ctime( &( daydata->seek_block_data[sec].time ) ) );
+					bool_tmp = 1;
+				}
+			}
+			else
+			{
+				if( daydata->seek_block_data[sec].seek==0 && daydata->seek_block_data[sec].time == 0 )
+				{
+					printf("end:\tblock:%lld\ttime:%d-->%s",daydata->seek_block_data[sec-1].seek , \
+							daydata->seek_block_data[sec-1].time, \
+							ctime( &( daydata->seek_block_data[sec-1].time ) ) );
+					bool_tmp = 0;
+					printf("\n");
+				}
+			}
+		}
+	}
+	return 0;
+}
+/*************************************************************************
  * 功能：读硬盘通过rtsp发送
  *************************************************************************/
-int read_disk()
+int read_disk(int time_begin)
 {
 	int err;
 	static struct  seek_block block;
@@ -1208,7 +1266,7 @@ int read_disk()
 			return BLOCK_ERR_READ_TYPE;
 		}
 		//在天块中找到当前秒块的位置
-		for(tmp=0; tmp < SECOFDAY; tmp++)
+		for(tmp=time_begin%SECOFDAY; tmp < SECOFDAY; tmp++)
 		{
 			if(daydata->seek_block_data[tmp].seek != 0 && daydata->seek_block_data[tmp].time != 0)
 			{
@@ -1247,6 +1305,7 @@ int read_disk()
 		//此块数据在硬盘上占空间的大小
 		hd_current_sec_seek = hd_current_sec_seek + \
 				get_block_num( ((struct hd_frame *)frame_buff)->size + sizeof(struct hd_frame));
+		printf("next sec seek:%lld,",hd_current_sec_seek);
 	}
 	return 0;
 }

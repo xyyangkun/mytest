@@ -115,6 +115,11 @@ extern int block_year_get();
 
 #define BLOCK_ERR_UNKNOW_TIME -1000		//未知道的时间错误：可能系统时间回到1970,也可能其它错误
 #define BLOCK_ERR_DAY_PASS -1001		//今天过去了。让watch重启吧。
+#define BLOCK_INFO_DAY_BLOCK_COVER -1002 //天块要被秒块占用了，要把此天块copy到day_data_bac中；\
+										//	想读取早时间内容时，应该:1、先从年块中找到最新的天，再从天块中找到最新秒块的seek；
+										//  2、从day_data_bac中找到最接近1中seek的块，并验证有效性！！
+#define BLOCK_ERR_YEAR_PRINT -1003		//年块中天块seek_block输出时出错，不符合正常的逻辑
+
 /*******************************************************************************
  * 获取系统时间
  *******************************************************************************/
@@ -130,6 +135,7 @@ int get_time();
 		printf("function:[%s],line:%d: \n",__FUNCTION__,__LINE__);\
 	}while(0)
 #define BLOCK_ERR_READ_NEW_DISK  -200	//读的是新硬盘
+
 #endif /* BLOCK_H_ */
 
 
