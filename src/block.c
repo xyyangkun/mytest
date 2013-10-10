@@ -201,7 +201,7 @@ int hd_getsize(long long *blocks)
 #else
 	//真实硬盘代码
 	//bug fix!!!!!!
-	*blocks = hd_blocks = 312581808/* /144 */;//160G
+	*blocks = hd_blocks = 312581808 /* /144 */;//160G
 #endif
 	return 0;
 }
@@ -669,12 +669,40 @@ long long  block_day_read_and_get_seek()
 	return 0;//不前天块中没有有效数据
 }
 /***********************************************************
+*功能:把最老的天块备份到day_data_bac中
+*返回：0正常
+ ***********************************************************/
+int block_day_back()
+{
+	int err;
+	//获取最早的天块的seek
+	static struct seek_block dayblock;
+	if ((err = block_year_get(&dayblock, head)) < 0)
+	{
+		printf("block year get err and exit");
+		gtlogerr("block year get err and exit");
+		return err;
+	}
+	//把最早的天块读入day_data_bac中
+	if ((err = sda_read(day_data_bac, sizeof(day_data_bac),
+			get_block_num( sizeof( struct day_block ) ), dayblock.seek))
+			< 0)
+	{
+		printf("hd_read error\n");
+		printf("block year get err and exit");
+		return err;
+	}
+	//从年块中删除最早的天块。
+	block_year_del(head);
+	return 0;
+}
+/***********************************************************
 *功能:向硬盘中写入数据。
 *
  ***********************************************************/
 static int write_disk1()
 {
-	static struct  seek_block block;
+	static struct  seek_block block, dayblock;
 	static enum opera_type get_type;
 	static enum block_type this_block_type;
 	static int err;
@@ -762,13 +790,22 @@ next1:
 									A、是秒块:从day_data_bac，中清除此位置(这个不在定情入的时候操作)\
 									B、是天块：把天读到day_data_bac中，同时写入到对应的位置
 /**********************************************************************************************************************************************************/
-		if( (hd_current_day_seek >= hd_current_sec_seek) )//
+		if ((err = block_year_get(&dayblock, head)) < 0)//获取最早天块位置
 		{
-				printf("%d\tBLOCK_INFO_DAY_BLOCK_COVER:\n",BLOCK_INFO_DAY_BLOCK_COVER);
-				gtloginfo("%d\tBLOCK_INFO_DAY_BLOCK_COVER:\n",BLOCK_INFO_DAY_BLOCK_COVER);
-				if(sys_time/SECOFDAY != block.time/SECOFDAY)/*系统时间和年块中最后一块天块的时间在不在同一天，才把年块删了*/
-					block_year_del( get_type );
-				memcpy(day_data_bac, day_data, sizeof(day_data));
+			printf("block year get err and exit");
+			gtlogerr("block year get err and exit");
+			return err;
+		}
+		if(  buff_blocks < dayblock.seek - hd_current_sec_seek )//马上要把最早的天块给覆盖了。
+		{
+			printf("%d\tBLOCK_INFO_DAY_BLOCK_COVER:\n",
+					BLOCK_INFO_DAY_BLOCK_COVER);
+			gtloginfo(
+					"%d\tBLOCK_INFO_DAY_BLOCK_COVER:\n", BLOCK_INFO_DAY_BLOCK_COVER);
+			if ((err = block_day_back()) < 0)//复制最早的天块
+			{
+				return err;
+			}
 		}
 		//4、写数据
 		err=sda_write(hd_frame_buff, sizeof(frame_buff), buff_size, hd_current_sec_seek);
