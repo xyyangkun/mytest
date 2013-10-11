@@ -683,14 +683,14 @@ int block_day_backup()
 		gtlogerr("block year get err and exit");
 		return err;
 	}
-	//把最早的天块读入day_data_bac中
-	if ((err = sda_read(day_data_bac, sizeof(day_data_bac),
-			get_block_num( sizeof( struct day_block ) ), dayblock.seek))
-			< 0)
+	//复制块内容
+	memcpy((void *)day_data_bac, (void *)day_data, sizeof(day_data));
+	//把daydata_bac写入硬盘
+	if(sda_write(day_data_bac, sizeof(day_data_bac), sizeof(day_data_bac), first_block+ get_block_num(sizeof(year_data)) ) < 0)
 	{
-		printf("hd_read error\n");
-		printf("block year get err and exit");
-		return err;
+		gtloginfo("debug\n");
+		printf("hd_write error\n");
+		return -1;
 	}
 	return 0;
 }
@@ -788,11 +788,14 @@ next1:
 			gtloginfo("debug HD_ERR_FULL\n");
 			if( front_dayblock.time/SECOFDAY == block.time/SECOFDAY )//年块中最前的一天的时间和当前块的时间在同一天，说明硬盘空间不足以存下一天的数据
 			{
-				if ((err = block_day_backup()) < 0)//复制最早的天块,但不是年块中删除节点
+				printf("disk is samall,sizeof day_data:%d\n",sizeof(day_data));
+				gtloginfo("disk is samall,sizeof day_data:%d\n",sizeof(day_data));
+				if ((err = block_day_backup()) < 0)//复制最早的天块
 				{
 					gtloginfo("debug block_day_backup  %d\n", __LINE__);
 					return err;
 				}
+				memset((void *)(daydata->seek_block_data), 0,sizeof(struct seek_block)*SECOFDAY );//把day_data中的seek_block_data全置为0
 				hd_current_sec_seek =first_seek+ get_block_num( sizeof( struct day_block )  );//如果硬盘空间不足存下一天的数据，此天块不覆盖。跨过去。
 			}
 			else
@@ -1217,8 +1220,49 @@ int read_disk_print_record_time()
 		gtloginfo("%d\tyearblock is emputy!!!\n",BLOCK_ERR_EMPTY);
 		return BLOCK_ERR_EMPTY;
 	}
-	printf("day of yearblock:%d\n",yearblock->year_queue_data.queue_size);
+	//看看day_data_bak中是不是有数据,并输出
+	//读day_data_bac中内容
+	err = block_read(day_data_bac, sizeof(day_data_bac), first_block+ get_block_num(sizeof(year_data)),
+			&this_block_type);
+	if (err < 0)
+	{
+		//printf("debug\n");
+		//return err;
+		printf("day_data_bac is emputy\n");
+	}
+	else
+	{
+		const struct day_block *daydata_bac    =  (struct day_block  *)day_data_bac;
+		printf("daydata_back::\n");
+		for( sec = 0; sec < SECOFDAY ; sec++ )
+		{
+			if(bool_tmp == 0)
+			{
+				if( daydata_bac->seek_block_data[sec].seek!=0 || daydata_bac->seek_block_data[sec].time != 0 )
+				{
+
+					printf("start:\tblock:%lld\ttime:%d-->%s",daydata_bac->seek_block_data[sec].seek , \
+							daydata_bac->seek_block_data[sec].time, \
+							ctime( &( daydata_bac->seek_block_data[sec].time ) ) );
+					bool_tmp = 1;
+				}
+			}
+			else
+			{
+				if( daydata_bac->seek_block_data[sec].seek==0 && daydata_bac->seek_block_data[sec].time == 0 )
+				{
+					printf("end:\tblock:%lld\ttime:%d-->%s",daydata_bac->seek_block_data[sec-1].seek , \
+							daydata_bac->seek_block_data[sec-1].time, \
+							ctime( &( daydata_bac->seek_block_data[sec-1].time ) ) );
+					bool_tmp = 0;
+					printf("\n");
+				}
+			}
+		}
+	}
 	//遍历年块中的数据；
+	printf("day of yearblock:%d\n",yearblock->year_queue_data.queue_size);
+	bool_tmp=0;
 	for(day=yearblock->year_queue_data.queue_head; \
 		day < yearblock->year_queue_data.queue_head + yearblock->year_queue_data.queue_size; \
 		day++)

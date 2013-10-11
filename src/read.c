@@ -5,13 +5,19 @@
  *      Author: yangkun
  */
 #include "block.h"
-
+/*0.01 基本测试可以读出正常。
+ *
+ *
+ */
+#define READ_VERSION "0.01"
 int main()
 {
 	long long blocks;
 	int time_begin;//你想要从什么时间开始读
 	int ret;
 	gtopenlog("hd_read");							//打开日志记录
+	printf("VERSION:%s\n",READ_VERSION);
+	gtloginfo("VERSION:%s\n\n\n",READ_VERSION);
 	if(dh_init()<0)
 	{
 		perror("dh init");
