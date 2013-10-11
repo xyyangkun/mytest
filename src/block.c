@@ -672,7 +672,7 @@ long long  block_day_read_and_get_seek()
 *功能:把最老的天块备份到day_data_bac中
 *返回：0正常
  ***********************************************************/
-int block_day_back()
+int block_day_backup()
 {
 	int err;
 	//获取最早的天块的seek
@@ -692,8 +692,6 @@ int block_day_back()
 		printf("block year get err and exit");
 		return err;
 	}
-	//从年块中删除最早的天块。
-	block_year_del(head);
 	return 0;
 }
 /***********************************************************
@@ -790,14 +788,16 @@ next1:
 			gtloginfo("debug HD_ERR_FULL\n");
 			if( front_dayblock.time/SECOFDAY == block.time/SECOFDAY )//年块中最前的一天的时间和当前块的时间在同一天，说明硬盘空间不足以存下一天的数据
 			{
-				if ((err = block_day_back()) < 0)//复制最早的天块
+				if ((err = block_day_backup()) < 0)//复制最早的天块,但不是年块中删除节点
 				{
+					gtloginfo("debug block_day_backup  %d\n", __LINE__);
 					return err;
 				}
-				hd_current_sec_seek =first_seek+sizeof(day_data);//如果硬盘空间不足存下一天的数据，此天块不覆盖。跨过去。
+				hd_current_sec_seek =first_seek+ get_block_num( sizeof( struct day_block )  );//如果硬盘空间不足存下一天的数据，此天块不覆盖。跨过去。
 			}
 			else
 				hd_current_sec_seek =first_seek;
+			gtloginfo("hd_current_sec_seek:%d\n",hd_current_sec_seek);
 			//return HD_ERR_FULL;
 		}
 /**********************************************************************************************************************************************************/
@@ -815,10 +815,13 @@ next1:
 			gtloginfo(
 					"%d\tBLOCK_INFO_DAY_BLOCK_COVER:dayblock.seek:%d,hd_current_sec_seek:%d,buff_blocks:%d\n",
 					BLOCK_INFO_DAY_BLOCK_COVER,front_dayblock.seek,hd_current_sec_seek,buff_blocks);
-			if ((err = block_day_back()) < 0)//复制最早的天块
+			if ((err = block_day_backup()) < 0)//复制最早的天块
 			{
+				gtloginfo("debug block_day_backup  %d\n", __LINE__);
 				return err;
 			}
+			//从年块中删除最早的天块。
+			block_year_del(head);
 		}
 		//4、写数据
 		err=sda_write(hd_frame_buff, sizeof(frame_buff), buff_size, hd_current_sec_seek);

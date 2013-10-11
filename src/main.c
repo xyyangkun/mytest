@@ -10,6 +10,12 @@
  * 已有bug：硬盘大小必需能存一天的数据
  *
  ************************************************************/
+
+/*0.01 基本测试可以写入正常。
+ *
+ *
+ */
+#define WRITE_VERSION "0.01"
 //#define STDTEST
 int main()
 {
@@ -17,7 +23,8 @@ int main()
 	static char buf[512];
 	int tmp;
 	gtopenlog("hd_write");							//打开日志记录
-
+	printf("VERSION:%s\n",WRITE_VERSION);
+	gtloginfo("VERSION:%s\n\n\n",WRITE_VERSION);
 	//test_print_size();
 	if(dh_init()<0)
 	{
