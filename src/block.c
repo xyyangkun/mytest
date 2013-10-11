@@ -201,7 +201,7 @@ int hd_getsize(long long *blocks)
 #else
 	//真实硬盘代码
 	//bug fix!!!!!!
-	*blocks = hd_blocks = 312581808 /* /144 */;//160G
+	*blocks = hd_blocks = 312581808/144;//160G
 #endif
 	return 0;
 }
@@ -702,7 +702,7 @@ int block_day_back()
  ***********************************************************/
 static int write_disk1()
 {
-	static struct  seek_block block, dayblock;
+	static struct  seek_block block, front_dayblock/*年块中最前面的天*/;
 	static enum opera_type get_type;
 	static enum block_type this_block_type;
 	static int err;
@@ -773,6 +773,13 @@ next1:
 			start = true;
 		if(!start)
 			continue;
+
+		if ((err = block_year_get(&front_dayblock, head)) < 0)//获取最早天块位置
+		{
+			printf("block year get err and exit");
+			gtlogerr("block year get err and exit");
+			return err;
+		}
 /**********************************************************************************************************************************************************/
 		//2、判断硬盘的剩余空间是否够写这一帧： \
 						a、满：改hd_current_day_seek和hd_current_sec_seek的值\
@@ -780,8 +787,18 @@ next1:
 		buff_blocks = get_block_num( buff_size );//计算此块在硬盘上占用的空间
 		if(hd_blocks - hd_current_sec_seek < buff_blocks)//剩下的空间不足够写入此帧数据了
 		{
-			gtlogerr("disk HD_ERR_FULL\n");
-			return HD_ERR_FULL;
+			gtloginfo("debug HD_ERR_FULL\n");
+			if( front_dayblock.time/SECOFDAY == block.time/SECOFDAY )//年块中最前的一天的时间和当前块的时间在同一天，说明硬盘空间不足以存下一天的数据
+			{
+				if ((err = block_day_back()) < 0)//复制最早的天块
+				{
+					return err;
+				}
+				hd_current_sec_seek =first_seek+sizeof(day_data);//如果硬盘空间不足存下一天的数据，此天块不覆盖。跨过去。
+			}
+			else
+				hd_current_sec_seek =first_seek;
+			//return HD_ERR_FULL;
 		}
 /**********************************************************************************************************************************************************/
 		//3、判断下一块要写入的数据的位置是否是空数据(其实只有满了后才应该判断)：  \
@@ -790,18 +807,14 @@ next1:
 									A、是秒块:从day_data_bac，中清除此位置(这个不在定情入的时候操作)\
 									B、是天块：把天读到day_data_bac中，同时写入到对应的位置
 /**********************************************************************************************************************************************************/
-		if ((err = block_year_get(&dayblock, head)) < 0)//获取最早天块位置
+		if( (front_dayblock.seek - hd_current_sec_seek >= 0)&&
+				(buff_blocks > front_dayblock.seek - hd_current_sec_seek) )//马上要把最早的天块给覆盖了。++只有硬盘空间足够存一天的数据，这个if才为真，可运行
 		{
-			printf("block year get err and exit");
-			gtlogerr("block year get err and exit");
-			return err;
-		}
-		if(  buff_blocks < dayblock.seek - hd_current_sec_seek )//马上要把最早的天块给覆盖了。
-		{
-			printf("%d\tBLOCK_INFO_DAY_BLOCK_COVER:\n",
-					BLOCK_INFO_DAY_BLOCK_COVER);
+			printf("%d\tBLOCK_INFO_DAY_BLOCK_COVER:dayblock.seek:%d,hd_current_sec_seek:%d,buff_blocks:%d\n",
+					BLOCK_INFO_DAY_BLOCK_COVER,front_dayblock.seek,hd_current_sec_seek,buff_blocks);
 			gtloginfo(
-					"%d\tBLOCK_INFO_DAY_BLOCK_COVER:\n", BLOCK_INFO_DAY_BLOCK_COVER);
+					"%d\tBLOCK_INFO_DAY_BLOCK_COVER:dayblock.seek:%d,hd_current_sec_seek:%d,buff_blocks:%d\n",
+					BLOCK_INFO_DAY_BLOCK_COVER,front_dayblock.seek,hd_current_sec_seek,buff_blocks);
 			if ((err = block_day_back()) < 0)//复制最早的天块
 			{
 				return err;
@@ -950,12 +963,6 @@ int write_disk()
 			gtloginfo("sizeof day_data:%d\n",sizeof(day_data));
 			gtloginfo("hd_current_sec_seek:%lld, hd_current_day_seek:%lld\n",\
 								hd_current_sec_seek,hd_current_day_seek);
-			break;
-		case HD_ERR_FULL:
-			gtloginfo("debug HD_ERR_FULL\n");
-			hd_current_sec_seek =first_seek;
-			//这应该复制天块了。！！！！！
-			//return -1;
 			break;
 		default:
 			gtlogerr("unknow err:%d\n",err);
